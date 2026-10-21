@@ -1876,8 +1876,10 @@ The status lines, the stderr failure line and the exit code are those of pretty.
 
 ## 9. M1 doctor (scoped subset of the TypeScript checks)
 
-Checks, always all eight (seven before 0.10), in order: `Tenant`, `Config file`, `Environment`,
-`Scanner credentials`, `Management credentials`, `Scanner API`, `Management OAuth`, `Gateway API` (§19.16).
+Checks, always all nine (seven before 0.10, eight before 8.0), in order: `Executable` (§21.15, D331),
+`Tenant`, `Config file`, `Environment`, `Scanner credentials`, `Management credentials`, `Scanner API`,
+`Management OAuth`, `Gateway API` (§19.16). `Executable` reads only `PATH` and the running executable and is
+evaluated before the tenant; "every later check" below means the checks after `Tenant`.
 JSON: array of `{name, status, detail[, hint]}` (`hint` omitted when absent); statuses
 `pass|warn|fail|skip`. Exit 1 iff any `fail`. `notEvaluated` =
 `skip` / `not evaluated — fix the failed checks above first` (em dash U+2014).
@@ -1908,7 +1910,7 @@ subtitle dim, the glyph per status (`✓` green, `⚠` and `○` yellow, `✗` r
 dim, the summary green or red as one span.
 
 Table (`--output table`, R§3.9): the §2.7 table with columns `Name │ Status │ Detail │
-Hint` over the eight checks, `status` as the raw `pass|warn|fail|skip`, an absent hint
+Hint` over the nine checks, `status` as the raw `pass|warn|fail|skip`, an absent hint
 as an empty cell, `detail` and `hint` through `terminal_safe`. No header, no summary,
 nothing on stderr (the failure summary is not printed either), and `--quiet` changes
 nothing. Exit 1 iff any check failed. The TS table has eleven rows (D19), so its widths
@@ -1923,7 +1925,8 @@ Tiers (specified here; [TESTING.md](TESTING.md) explains how to run and extend t
    coercion, env report, output resolution, message mapping, normalisation, signal
    decisions).
 2. **Loopback executable tests** (`cargo test`): `tests/*.rs` spawn the real
-   `airs` binary (`CARGO_BIN_EXE_airs`, §21.6; and, for `tests/parity_*.rs`, the TypeScript reference
+   `airs` binary (with the inherited `PATH` minus every entry that holds an `airs`, `airs-cli` or
+   `airs-cli-rs`, so an installed copy never changes the doctor's `Executable` check, §21.15) (`CARGO_BIN_EXE_airs`, §21.6; and, for `tests/parity_*.rs`, the TypeScript reference
    `node .reference/prisma-airs-cli/dist/cli/index.js`) against the in-process fixture
    server from `crates/airs-test-harness`. They can never reach a non-loopback host:
    every endpoint in every fixture tenant is `http://127.0.0.1:<port>/...`, and a
@@ -4416,7 +4419,7 @@ raw scan read, §20.16 choice 77).
 | D16 | `--max 0` for topics | capped at 10,000 | uncapped (1,000,000 safety bound) | flag meaning |
 | D17 | `--revision abc`, `--limit 1e2`, `--limit 0x10` | NaN → not found / JS coercion accepted | usage error, decimal integers only | strict parsing |
 | D18 | empty scan content, profile name > 100, prompt > 2 MiB | exit 1 after status lines | exit 2 before reading the tenant | usage contract |
-| D19 | doctor checks (from 0.10 the `Gateway API` check is the eighth, §9, §19.16) | 11 (Node, Typesafe, AI Gateway included) | 7 scoped checks; 8 from 0.10 | release-1 scope |
+| D19 | doctor checks (from 0.10 the `Gateway API` check is the eighth, §9, §19.16; from 8.0 the `Executable` check is the first, D331) | 11 (Node, Typesafe, AI Gateway included) | 7 scoped checks; 8 from 0.10; 9 from 8.0 | release-1 scope |
 | D20 | doctor Scanner API on 5xx / 429 | pass | fail / warn | a 5xx does not prove the key was accepted |
 | D21 | doctor config check | plain read (oversized/non-regular files pass) | same strict reader as commands | no false healthy |
 | D22 | doctor credential presence | untrimmed | trimmed (same rule as commands) | consistency |
@@ -4678,10 +4681,12 @@ raw scan read, §20.16 choice 77).
 | D323 | interrupting a supplychain command (0.11) | SIGINT or SIGTERM end the process (130/143) with nothing printed | `Interrupted; no data was written` (reads), `Interrupted; no report was written` or `Interrupted; the report was saved in <path>` (report); stdout empty, no temporary file left (§20.3, §20.9) | defined cancel (D32) |
 | D324 | `supplychain scans list\|ls` and the report's Scans source when the service sends `null` where the scan contract requires a value (0.11, G71; observed live: `"fingerprint": null`) | the zod schema refuses the whole page: `  ✗ AgentGuard request failed. Check credentials, query options and service availability. No upstream body is included.` (exit 1); the report's Scans source `unavailable` | the page is read by the CLI's tolerant projection (§20.16): every `null` (or absent) member prints as `null` (JSON) or an empty cell (tables), the rows the schema accepts print byte for byte as before; the report counts the rows (a `null` creation time excluded, a `null` status unsettled, `null` labels `UNKNOWN`, a row whose `is_batch` and `child_scan_uuids` both leave its batch membership undecided left out of the counts with its note; either signal alone marks a parent, §20.17 choice 84) | the command is unusable on real tenants otherwise; no row is hidden (correctness) |
 | D325 | a supplychain scan page the tolerant projection still refuses (0.11, G71): a scan without a string `uuid`, a read member of another type, a page without its `pagination.total_items` | TS's request failure line (`… Check credentials, query options and service availability. …`) | `  ✗ The AgentGuard answer does not match the API contract; nothing was printed. No upstream body is included.` (exit 1, stderr, never suppressed; §20.16); a typed read's 2xx failing its schema, a body that is not JSON and an empty 2xx body keep TS's line (§20.17 choices 69, 83) | the line names the failure instead of sending the operator to check credentials (correctness) |
-| D326 | the executable name (1.0) | `airs-cli` (the npm `bin`); one name | `airs`; `airs-cli-rs` is a compatibility name through 1.x (a second `[[bin]]` for `cargo install` and the source build, a relative symlink in the release tarballs and the Homebrew formula) that prints the same bytes as `airs` for every invocation; there is no `airs-cli` name (§21.2) | both CLIs can be installed side by side without either shadowing the other, and 0.x scripts keep working |
+| D326 | the executable name (1.0; rewritten for 8.0) | `airs-cli` (the npm `bin`); one name | `airs`; `airs-cli-rs` is a compatibility name (a `[[bin]]` for `cargo install` and the source build, a relative symlink in the release tarballs and the Homebrew formula) that prints the same bytes as `airs` for every invocation; from 8.0 `airs-cli` is a third name of the same program (D330, §21.2). 1.x had no `airs-cli` name, so the two CLIs could be installed side by side | 0.x scripts keep working; from 8.0 the Rust CLI replaces the TypeScript one, so it also takes over its name |
 | D327 | `connection_params.audio_curl` of a target (1.0, scm-sdk 0.2.3: the management 0.86.0 audio curl template) in `targets get`, the `create`, `update`, `probe` and `update-profile` answers and an error log's `target_object` | printed raw, credentials included (an unknown passthrough key; 0.11 printed it too, since no §15.4 rule named it) | `[REDACTED]` whole like `curl` (§15.4 rule 3), only the credentials extracted from it join the secret set; a `[REDACTED]` or masked `audio_curl` is a withheld credential for backup and restore (D157) | D140 for the new curl template (§15.24) |
 | D328 | target request bodies with the management 0.86.0 values (1.0, scm-sdk 0.2.3): `connection_type` `VERTEX_AI` or `N8N`, `response_mode` `REALTIME`, `connection_params.multi_turn_config` `{"type": "client_session"}`, a Vertex AI `target_connection_config` (`project_id`, `location`, `engine_id`, `customer_sa_email`), in `targets create`, `update`, `probe` and the bodies `targets restore` sends | refused by the frozen request schema, nothing sent (exit 1): `AISEC_USER_REQUEST_PAYLOAD_ERROR:Request body for POST /v1/target did not match schema: connection_type: invalid_enum_value` (`response_mode: invalid_enum_value`, `connection_params: invalid_union`) | sent as given; a Vertex AI field outside its 0.86.0 request pattern (`project_id` `^[a-z0-9][a-z0-9-]{0,62}$`, `location` `^[a-z0-9-]+$`, `engine_id` `^[0-9]+$`, a server mask included) is refused with the D116 text, nothing sent (exit 1); the pass-through additions (`audio_request_json`, `audio_curl`, `basic_username`, `basic_password`) are sent by both (§15.24) | the pinned SDK's management 0.86.0 contract |
 | D329 | target answers with a Vertex AI `target_connection_config` or the `client_session` multi-turn config (1.0, scm-sdk 0.2.3) in `targets get`, the `create`, `update`, `probe` and `update-profile` answers and the `targets backup` reads | the zod response schema refuses the answer (`AISEC_RESPONSE_VALIDATION:Response did not match schema: connection_params: invalid_union`, exit 1; a backup's failed row), as 0.11 (scm-sdk 0.2.2) did with its decode message | read and printed (redacted, §15.4 rules 1, 3 and 4) and backed up; a backup read whose Vertex AI field breaks its request pattern (a server mask) is a failed row naming the masked fields and the remedy when they alone fail the create schema (`the service masked its Vertex AI project_id, which the target create schema refuses; recreate the target or set its identifiers by hand`; §15.18, §15.24 choice 13), one with a mask only in `customer_sa_email` is stored with `credentialsWithheld: true` (§15.24); a backup read whose answer carries `VERTEX_AI`, `N8N` or `REALTIME` without either config (read by 0.11 and TypeScript alike: their response schemas hold these as strings) is stored too, where 0.11 recorded the failed row `its settings do not match the target create schema` and exited 1, its create schema refusing the values (TypeScript stores it, under D151) | the pinned SDK's management 0.86.0 contract (response validation keeps the G25 relaxation and enforces no request pattern) |
+| D330 | the `airs-cli` name (8.0) | the TypeScript CLI (npm `bin` `airs-cli`): `Usage: airs-cli …`, `$ airs-cli …` examples, its own version | the Rust CLI under a third name (a `[[bin]]`, a relative tarball symlink, a Homebrew `install_symlink` and an npm `bin`, §21.2, §21.16) that prints exactly the bytes of `airs`: usage lines, examples and hints name `airs` (D73), `--version` prints the Rust version | the Rust CLI replaces the TypeScript CLI in `cdot/prisma-airs-cli` and on npm; 7.x scripts that run `airs-cli` keep working with the Rust CLI's behaviour |
+| D331 | doctor's `Executable` check (8.0) | none (its first check is `Node.js version`; `PATH` is never examined) | the first check, always evaluated: `warn` when another `airs`, `airs-cli` or `airs-cli-rs` earlier on `PATH` resolves to a different file than this program, else `pass`; never `fail`, so the exit code is unchanged (§21.15) | the four install channels can shadow each other (Homebrew's Node and the formula share `/opt/homebrew/bin`), and a stale TypeScript `airs-cli` may come first |
 
 ## 13. M4 runtime writes (0.4)
 
@@ -16276,6 +16281,9 @@ observable change is the program name in the texts of §21.4. This section is bi
 any earlier section that quotes the program name. The settled scope (MILESTONES "1.0") is not re-opened here: the
 name is `airs`, the compatibility name is `airs-cli-rs`, there is no `airs-cli` alias (it would collide with the
 TypeScript CLI's npm `bin`), and directories, store formats, environment variables and tenant keys do not change.
+**8.0 amends this section** (§21.15–§21.17): the Rust CLI replaces the TypeScript CLI in `cdot/prisma-airs-cli` and
+on npm, so `airs-cli` becomes a third name of the same program (D330), doctor gains the `Executable` check (D331),
+and npm becomes a distribution channel; where §21.2–§21.14 say there is no `airs-cli` name, they describe 1.x.
 
 "airs-cli-rs" remains the name of this Rust implementation and its repository in prose (this document, TESTING,
 COMPATIBILITY, the harness), where it tells the Rust CLI from the TypeScript `airs-cli`. Every command line, example,
@@ -16315,14 +16323,20 @@ default-run = "airs"
 name = "airs"
 path = "src/main.rs"
 
+# The TypeScript CLI's name (DESIGN §21.2, 8.0): the same program, so 7.x scripts keep working.
+[[bin]]
+name = "airs-cli"
+path = "src/bin/airs-cli.rs"
+
 # The 1.x compatibility name (DESIGN §21.2): the same program under its 0.x name.
 [[bin]]
 name = "airs-cli-rs"
 path = "src/bin/airs-cli-rs.rs"
 ```
 
-`src/bin/airs-cli-rs.rs` is exactly one doc comment line and `include!("../main.rs");`, so both binaries are built
-from the same `main` and call the same `airs_cli_rs::run`; they cannot differ. The library target keeps the name
+`src/bin/airs-cli-rs.rs` (and, from 8.0, `src/bin/airs-cli.rs`) is exactly one doc comment line and
+`include!("../main.rs");`, so every binary is built from the same `main` and calls the same `airs_cli_rs::run`; they
+cannot differ. The library target keeps the name
 `airs_cli_rs` (choice 13). `[package] description` drops "(executable airs-cli-rs until 1.0)" and reads
 `Native Rust CLI for Prisma AIRS (the airs command), built on the scm-sdk crate`.
 
@@ -16330,21 +16344,23 @@ from the same `main` and call the same `airs_cli_rs::run`; they cannot differ. T
 `#[command(name = PROGRAM, bin_name = PROGRAM, version, …)]` with `store::PROGRAM = "airs"`. With `bin_name` set,
 clap never derives it from `argv[0]`, so `airs`, `airs-cli-rs`, a symlink with any other name and a path such as
 `./target/debug/airs-cli-rs` all print `Usage: airs …`, the same help, the same D91 usage line and the same messages.
-Nothing else reads `argv[0]`. For every invocation the compatibility name prints the same bytes on stdout and stderr
-and exits with the same code as `airs` (D326). No deprecation notice is printed in 1.x (choice 5); the compatibility
+Nothing else reads `argv[0]`. For every invocation the compatibility name (and from 8.0 `airs-cli`) prints the same
+bytes on stdout and stderr and exits with the same code as `airs` (D326, D330). No deprecation notice is printed in 1.x (choice 5); the compatibility
 name is dropped no earlier than 2.0, announced in that release's notes.
 
-How each install path provides the two names:
+How each install path provides the names (the `airs-cli` column from 8.0):
 
-| Install path | `airs` | `airs-cli-rs` |
-|---|---|---|
-| `cargo install --locked airs-cli` (and `cargo install --path .`) | the `airs` binary | the second `[[bin]]`: a second copy of the same program (about 22 MB each); a 0.x install's `airs-cli-rs` is replaced by it on upgrade |
-| `cargo build --release` | `target/release/airs` | `target/release/airs-cli-rs` (a second copy) |
-| release tarballs (§21.7) | the signed `airs` | a relative symlink `airs-cli-rs -> airs` |
-| Homebrew `cdot65/prisma-airs-cli/airs-cli` (§21.8) | `cargo install --bin airs` | `bin.install_symlink "airs" => "airs-cli-rs"` |
+| Install path | `airs` | `airs-cli` (8.0) | `airs-cli-rs` |
+|---|---|---|---|
+| `cargo install --locked airs-cli` (and `cargo install --path .`) | the `airs` binary | a `[[bin]]`: another copy of the same program | a `[[bin]]`: another copy (about 22 MB each); a 0.x install's `airs-cli-rs` is replaced by it on upgrade |
+| `cargo build --release` | `target/release/airs` | `target/release/airs-cli` (a copy) | `target/release/airs-cli-rs` (a copy) |
+| release tarballs (§21.7) | the signed `airs` | a relative symlink `airs-cli -> airs` | a relative symlink `airs-cli-rs -> airs` |
+| Homebrew `cdot65/prisma-airs-cli/airs-cli` (§21.8) | `cargo install --bin airs` | `bin.install_symlink "airs" => "airs-cli"` | `bin.install_symlink "airs" => "airs-cli-rs"` |
+| npm `@cdot65/prisma-airs-cli` (§21.16) | the `bin` `airs`, the launcher | the `bin` `airs-cli`, the same launcher | none |
 
-There is no `airs-cli` name on any path. Another `airs` earlier on `PATH` (for example one installed by an unrelated
-npm package) wins by `PATH` order; README says how to check (§21.10).
+In 1.x there was no `airs-cli` name on any path. Another `airs` (or, from 8.0, `airs-cli` or `airs-cli-rs`) earlier
+on `PATH` (for example one installed by an unrelated npm package, or the TypeScript CLI's `airs-cli`) wins by `PATH`
+order; README says how to check (§21.10), and from 8.0 `airs doctor` reports it (§21.15).
 
 ### 21.3 What does not change
 
@@ -16434,8 +16450,8 @@ pre-scan (D26, D41). The release check `"$mac_bin" --version` compares it with t
   of `PROGRAM_NEXT` must be exactly the root help's commands and `help`, so a new top-level command cannot be left
   out of the normaliser (choice 67).
 - **The compatibility binary** (`tests/program_name.rs::the_compatibility_binary_is_the_main_binary`):
-  `src/bin/airs-cli-rs.rs` is byte-for-byte the expected shim, and `Cargo.toml` declares exactly the two `[[bin]]`
-  targets of §21.2 with `default-run = "airs"`.
+  `src/bin/airs-cli-rs.rs` (and from 8.0 `src/bin/airs-cli.rs`) is byte-for-byte the expected shim, and
+  `Cargo.toml` declares exactly the `[[bin]]` targets of §21.2 (three from 8.0) with `default-run = "airs"`.
 
 ### 21.7 Release tarballs, signing and notarisation (chunk 2)
 
@@ -16455,10 +16471,11 @@ these change:
 - Notarisation: `ditto -c -k --keepParent target/aarch64-apple-darwin/release/airs` and the same notarytool flow.
 - Packaging moves to `scripts/package-release.sh [--run-check <target>] [--verify-signature <target>] <version> <dist>
   <target>=<binary>…`, which release.sh calls with `--run-check aarch64-apple-darwin`, in a real run also
-  `--verify-signature aarch64-apple-darwin`, and the three targets (the dry run calls it too, as it packages today). For each target it stages `airs` (0755, copied from `<binary>`), `airs-cli-rs` (a relative
-  symlink to `airs`, made with `ln -s airs`), `README.md` and `LICENSE` (0644), and writes
+  `--verify-signature aarch64-apple-darwin`, and the three targets (the dry run calls it too, as it packages today). For each target it stages `airs` (0755, copied from `<binary>`), from 8.0 `airs-cli` and
+  `airs-cli-rs` (relative symlinks to `airs`, made with `ln -s airs`), `README.md`, `LICENSE` and, from 8.0,
+  `NOTICE` (0644; Apache-2.0 §4(d) carries the NOTICE with every distribution), and writes
   `<dist>/airs-cli-<version>-<target>.tar.gz` with `COPYFILE_DISABLE=1 tar --no-mac-metadata --uid 0 --gid 0 --uname
-  root --gname root -czf … airs airs-cli-rs README.md LICENSE` (bsdtar stores the link as a link). Then
+  root --gname root -czf … airs airs-cli airs-cli-rs README.md LICENSE NOTICE` (bsdtar stores the links as links). Then
   `SHA256SUMS` (`shasum -a 256` of the three tarballs, nothing else). It refuses an empty positional argument
   first (`package-release: the <dist> argument is empty`, likewise `the <version> argument` and `a <target>=<binary>
   argument`; exit 2 with the usage, before any `mkdir` or `rm`, choice 59), then a `<dist>` that exists and is not
@@ -16469,12 +16486,13 @@ these change:
   `--verify-signature` target that is not packaged and an unknown option (exit 2, with the usage), all before it
   writes anything. A failure after the first write removes every file the run wrote, and the `<dist>` if the run
   created it (choice 43). release.sh's Tools step also requires bsdtar (choice 49).
-- **New packaging checks** (they only add to the existing ones): each tarball lists exactly `airs`, `airs-cli-rs`,
-  `README.md`, `LICENSE` in that order; extracted into `<dist>/.verify/<target>/`, `airs` is a regular 0755 file,
-  `airs-cli-rs` a symlink whose target is exactly `airs`, the text files 0644, every entry owned by `root:root` in
-  the listing; the extracted `airs` is byte-equal to its `<binary>` and `README.md` and `LICENSE` to the repository's
-  (choice 44); for the `--run-check` target, `./airs --version` and `./airs-cli-rs --version`, run inside the
-  extracted directory, both print the version (choice 54). A real run then runs `codesign --verify --strict` on the
+- **New packaging checks** (they only add to the existing ones): each tarball lists exactly `airs`, `airs-cli`
+  (8.0), `airs-cli-rs`, `README.md`, `LICENSE`, `NOTICE` (8.0) in that order; extracted into
+  `<dist>/.verify/<target>/`, `airs` is a regular 0755 file, `airs-cli` and `airs-cli-rs` symlinks whose target is
+  exactly `airs`, the text files 0644, every entry owned by `root:root` in the listing; the extracted `airs` is
+  byte-equal to its `<binary>` and the text files to the repository's (choice 44); for the `--run-check` target,
+  `./airs --version`, `./airs-cli --version` and `./airs-cli-rs --version`, run inside the extracted directory, all
+  print the version (choice 54). A real run then runs `codesign --verify --strict` on the
   extracted macOS `airs` (the signature survived packaging): package-release.sh does it for the
   `--verify-signature` target before `.verify` is removed (choice 42); a dry run prints that it would. `.verify` is
   removed afterwards, and `SHA256SUMS` must list exactly the tarballs and pass `shasum -a 256 -c`.
@@ -16503,12 +16521,14 @@ class AirsCli < Formula
 
   def install
     system "cargo", "install", "--bin", "airs", *std_cargo_args
-    # The 1.x compatibility name.
+    # The TypeScript CLI's name (from 8.0) and the 1.x compatibility name.
+    bin.install_symlink "airs" => "airs-cli"
     bin.install_symlink "airs" => "airs-cli-rs"
   end
 
   test do
     assert_equal version.to_s, shell_output("#{bin}/airs --version").strip
+    assert_equal version.to_s, shell_output("#{bin}/airs-cli --version").strip
     assert_equal version.to_s, shell_output("#{bin}/airs-cli-rs --version").strip
     ENV["AIRS_CLI_CONFIG_DIR"] = (testpath/"store").to_s
     assert_equal "[]", shell_output("#{bin}/airs tenant list --output json").strip
@@ -16639,9 +16659,10 @@ comparison with the renamed binary; the loopback self-tests cover the rest.
 ### 21.13 Acceptance tests
 
 Chunk 1:
-- `tests/shell.rs::compat::both_names_print_the_same_bytes`: for `--version`, `-V`, `--help`, `tenant --help`,
-  `runtime scan --help`, `bogus`, `tenant create dev extra` (D91), `--output yaml doctor`, `tenant list --output json`
-  on an empty store and `doctor` without a tenant, the two binaries give equal exit codes, stdout and stderr.
+- `tests/shell.rs::compat::every_name_prints_the_same_bytes` (named `both_names_print_the_same_bytes` in 1.x): for
+  `--version`, `-V`, `--help`, `tenant --help`, `runtime scan --help`, `bogus`, `tenant create dev extra` (D91),
+  `--output yaml doctor`, `tenant list --output json` on an empty store and `doctor` without a tenant, the binaries
+  (from 8.0 all three) give equal exit codes, stdout and stderr.
 - `tests/shell.rs::compat::the_start_name_never_reaches_the_output`: `airs` run through a symlink named
   `renamed-tool` in the sandbox's `tmp/` prints `Usage: airs [OPTIONS] [COMMAND]`.
 - `tests/parity_shell.rs::d326_the_program_is_airs_with_a_compatibility_name`: TypeScript `Usage: airs-cli`, both Rust
@@ -16700,7 +16721,8 @@ Chunk 2:
    different usage lines, breaking D326's byte equality and D91's fixed usage line.
 5. **No deprecation notice under `airs-cli-rs` in 1.x.** Rejected: a stderr notice (changes stderr bytes for scripts
    within 1.x and makes behaviour depend on `argv[0]`). The removal, not before 2.0, is announced in release notes.
-6. **No `airs-cli` alias** (settled; it would shadow or be shadowed by the TypeScript CLI).
+6. **No `airs-cli` alias** (settled for 1.x; it would shadow or be shadowed by the TypeScript CLI). Superseded in
+   8.0, which retires the TypeScript CLI: `airs-cli` is a name of the Rust CLI (D330, §21.15–§21.17).
 7. **The four file format names keep `airs-cli-rs.*`.** Rejected: `airs.*` with a reader accepting both (0.11 could
    not read 1.0 files, so a downgrade loses resumable jobs and backups; one more reader branch).
 8. **Directories, environment variables, store format and tenant keys are unchanged** (settled).
@@ -16884,3 +16906,93 @@ Chunk 2:
     (it said it was the normaliser's list, but a new top-level command added to one copy only made the two disagree
     with no failure) and a prefix assertion between the copies (it keeps two lists to edit, and neither would follow
     the CLI's command set).
+
+### 21.15 The `Executable` doctor check (8.0, D331)
+
+With four install channels (Homebrew, npm, cargo, release tarballs) and three names, an install can be shadowed by
+another one earlier on `PATH`: Homebrew's Node puts npm's global `bin` links in `/opt/homebrew/bin`, where the
+Homebrew formula links too, and a 7.x TypeScript `airs-cli` or an unrelated npm `airs` may come first. The doctor's
+first check reports it.
+
+- **Name and place.** `Executable`, the first of the nine checks (§9), evaluated on every run, before the tenant is
+  read (a store failure does not hide it).
+- **What it compares.** For each of `airs`, `airs-cli` and `airs-cli-rs`, in that order, the file a shell runs: the
+  first absolute `PATH` entry holding an executable regular file of that name (after symlinks; relative entries are
+  ignored, as for uv, D195), canonicalised. It is *this program* when it is the running executable
+  (`current_exe`, canonical), another of the three names in the running executable's own directory (`cargo install`
+  and `cargo build` write one copy per `[[bin]]` there), or the npm launcher that started this process
+  (`AIRS_NPM_LAUNCHER`, an absolute path the launcher sets to its own real path, §21.16; a relative value is
+  ignored). A name not on `PATH` is not reported.
+- **Outcomes.** `pass` `no other airs, airs-cli or airs-cli-rs earlier on PATH`; `warn` `<name> on PATH is another
+  program: <path>` (with ` (<canonical path>)` when the `PATH` entry is a link), one clause per shadowed name joined
+  by `; `, hint `Remove the other installation or put this one first on PATH; install airs through one channel only
+  (Homebrew, npm, cargo or a release tarball)`; `skip` `the running executable cannot be determined`. It never
+  fails, so doctor's exit code is unchanged; a warning counts in the summary. Paths go through `terminal_safe` like
+  every detail. No file is opened or run: only `stat`, `realpath` and the environment.
+- **Not covered.** A stale copy under one of the three names in the running executable's own directory counts as
+  this program (the directory rule above cannot tell a copy from an older file); `type -a airs airs-cli airs-cli-rs`
+  shows every match.
+- **Tests.** `src/commands/doctor.rs::tests::executable_check` (order, the executable bit, links, the own-directory
+  rule, the launcher, relative entries, an unknown executable), `tests/doctor.rs::executable::*` (warnings, links,
+  the launcher variable, the check before a store failure and its pretty line) and
+  `tests/parity_doctor.rs::divergence::d331_the_executable_check_is_rust_only`. The harness removes every inherited
+  `PATH` entry holding one of the three names (`airs_test_harness::path_without_programs`), so a developer's
+  installed copy never changes the other tests; a test that wants one sets `PATH` itself.
+
+### 21.16 The npm channel (8.0)
+
+npm becomes a binary-distribution channel, in the layout of `@openai/codex` (checked against
+`npm view @openai/codex@latest`: one package, a `bin` launcher, and `optionalDependencies` that alias platform
+versions of the same package).
+
+- **The launcher package** `@cdot65/prisma-airs-cli` (`npm/package.json`, committed with the placeholder version
+  `0.0.0`): `bin` `{ "airs": "bin/airs.js", "airs-cli": "bin/airs.js" }`, `optionalDependencies`
+  `"@cdot65/prisma-airs-cli-<platform>": "npm:@cdot65/prisma-airs-cli@<version>-<platform>"` for `darwin-arm64`,
+  `linux-x64` and `linux-arm64`, `engines.node >= 18`, `license` Apache-2.0, `repository` `cdot/prisma-airs-cli`,
+  `files` `bin/airs.js`, `lib/launcher.js`, `README.md`, `LICENSE`, `NOTICE`. No install script.
+- **Platform versions** `<version>-<platform>` of the same package, with `os`/`cpu` set and no `bin`, each holding
+  exactly the released binary for its target at `vendor/<target>/airs` (darwin-arm64: the signed, notarised
+  `aarch64-apple-darwin` build; linux-x64 and linux-arm64: the static musl builds, which run on glibc and musl
+  alike), plus `README.md`, `LICENSE` and `NOTICE`. Nothing is downloaded at install time.
+- **The launcher** (`npm/bin/airs.js` → `npm/lib/launcher.js`, ESM): resolves the platform package with
+  `require.resolve('<alias>/package.json')`, spawns `vendor/<target>/airs` with the launcher's arguments,
+  `stdio: 'inherit'` and the environment plus `AIRS_NPM_LAUNCHER=<its real path>` (§21.15), and exits with the
+  child's code, or re-raises the child's terminating signal after removing its own handlers (128 + n if it
+  survives). It forwards SIGTERM and SIGHUP always, and SIGINT and SIGQUIT only when none of stdin, stdout and stderr
+  is a terminal: a terminal already delivers Ctrl-C and Ctrl-\ to the whole foreground process group, and a second
+  SIGINT makes `airs` exit at once (§2.5). The binary never sees the launcher's `argv[0]` and prints `airs` whatever
+  name started it (§21.2). An unsupported platform (Intel macOS, Windows, any other) and a missing optional
+  dependency (`--omit=optional`, a platform mismatch) print `airs: …` naming `cargo install --locked airs-cli` and
+  the Homebrew tap (plus `npm install -g @cdot65/prisma-airs-cli` for the missing package) and exit 1; a binary that
+  cannot be started prints `airs: cannot run <path>: <error>` and exits 1.
+- **Staging** (`scripts/npm-package.sh [--dist <dir>] [--output <dir>] [--verify-signature] <version>`): checks that
+  the dist's `SHA256SUMS` lists exactly the three `airs-cli-<version>-<target>.tar.gz` and that they match it, that
+  each lists exactly the §21.7 entries and holds an executable `airs`; stages each platform version (the binary
+  byte-equal to the tarball's) and the launcher package (version and aliases filled in from the template, which
+  must name exactly the three platforms) under `<output>/packages/`, runs `npm pack` on each with an empty user
+  configuration, checks every packed file list, and writes `<output>/SHA256SUMS` of the four `.tgz`. The defaults
+  are `target/dist/<version>` and `target/npm/<version>`; a non-empty output is refused, and a failure removes what
+  the run wrote. It never publishes. Publishing order and dist-tags are RELEASING §7.
+- **Tests.** `npm/test/launcher.test.js` (`node --test`; run by `tests/npm_package.rs::the_launcher_tests_pass`),
+  `tests/npm_package.rs::npm_package_refuses_bad_input_and_writes_nothing`, and on macOS
+  `tests/npm_package.rs::staging::the_staged_packages_hold_the_release_binaries` and
+  `tests/npm_package.rs::staging::an_install_from_the_staged_tarballs_runs_both_names`: tarballs packaged from this
+  build's `airs` (and Linux stubs), staged, served by a loopback registry (`npm/test/install-check.mjs`; empty user
+  and global npm configuration, private cache and prefix, no audit or update check) and installed with
+  `npm install --global` into a temporary prefix, where `airs --version` and `airs-cli --version` print the version,
+  only the darwin-arm64 platform package is installed, and `airs doctor`'s `Executable` check passes through the npm
+  links.
+
+### 21.17 The move into `cdot/prisma-airs-cli` (8.0)
+
+- The Rust tree was copied from `cdot/prisma-airs-cli-rs` at `a9d7864f037cc3bf0d2ef6de2c8ac6341ce3842a` with `git
+  archive`, without its history, into the repository that held the TypeScript CLI; the TypeScript sources, tests,
+  tooling and lockfiles were deleted from the tree and stay in its history and `v7.*` tags.
+- The parity reference is a commit of this repository's history; `scripts/build-reference-cli.sh` clones it from
+  this repository's Forgejo URL, or from a local path, and CI clones it from its own full-history checkout (TESTING
+  §3.1, §10).
+- One version everywhere from 8.0.0: the crate `airs-cli`, `airs --version`, the tag, the Forgejo release, the
+  Homebrew formula and npm. The 1.x line ends at 1.0.0; there is no 1.0.1 or 1.1.0.
+- `NOTICE` (Apache-2.0, both CLIs) ships in the crate, the release tarballs and every npm package.
+- The docs site `https://cdot65.github.io/prisma-airs-cli/` is built from `docs-site/` (Docusaurus); its command
+  reference is generated from the `--help` of every command (`tests/cli_reference.rs`).

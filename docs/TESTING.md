@@ -888,14 +888,23 @@ stalled stderr never fills from those short lines, and the run could exit before
 The doctor's management-credential line (D312) is `tests/doctor.rs::credentials` and
 `tests/parity_doctor.rs::divergence::d312_the_doctor_names_supplychain_commands`.
 
-### 5.21 The program name and the compatibility binary (1.0, DESIGN §21)
+### 5.21 The program names and the doctor's Executable check (1.0, 8.0, DESIGN §21)
 
-Every test runs `env!("CARGO_BIN_EXE_airs")`. The compatibility binary
-`CARGO_BIN_EXE_airs-cli-rs` runs only in the tests that prove it is the same program:
-`tests/shell.rs::compat` (the same exit code, stdout and stderr as `airs` for help,
+Every test runs `env!("CARGO_BIN_EXE_airs")`. The other binaries, `CARGO_BIN_EXE_airs-cli`
+(8.0) and `CARGO_BIN_EXE_airs-cli-rs`, run only in the tests that prove they are the same
+program: `tests/shell.rs::compat` (the same exit code, stdout and stderr as `airs` for help,
 version, parse errors, a usage error, an empty store and doctor without a tenant; a
-symlink named `renamed-tool` still prints `Usage: airs …`) and
-`tests/parity_shell.rs::d326_the_program_is_airs_with_a_compatibility_name`.
+symlink named `renamed-tool` still prints `Usage: airs …`),
+`tests/parity_shell.rs::d326_the_program_is_airs_with_a_compatibility_name` and
+`tests/parity_shell.rs::d330_airs_cli_is_a_name_of_the_rust_cli`.
+
+The doctor's first check, `Executable` (D331), looks for `airs`, `airs-cli` and
+`airs-cli-rs` on `PATH`. The runner therefore removes every inherited `PATH` entry that
+holds one of them (`airs_test_harness::path_without_programs`), so an installed copy on
+the developer's machine never changes a doctor test; `tests/doctor.rs` and
+`tests/parity_doctor.rs` expect the `Executable` pass first. The tests of the check itself
+(`tests/doctor.rs::executable`, `d331_the_executable_check_is_rust_only`) set `PATH`
+explicitly, with stub programs and links under the sandbox or `CARGO_TARGET_TMPDIR`.
 `tests/program_name.rs` reads files and runs help only, with no tenant and no request:
 the source scan (every `airs-cli-rs` in `src/` is one of the four kept format names), the
 docs scan (no current document, RELEASING.md included, invokes `airs-cli-rs`), the shim and `Cargo.toml` check, and a walk of every command's
@@ -929,18 +938,46 @@ with a cleared environment, `HOME` and `TMPDIR` inside a fresh directory under
   tests/fixtures/homebrew/airs-cli-1.0.0.rb` (the checksum is the `CHECKSUM` constant of
   the test).
 - `tests/release_packaging.rs`: everywhere, `bash -n` and the executable bit of
-  `scripts/release.sh`, `scripts/package-release.sh` and `scripts/homebrew-formula.sh`,
+  `scripts/release.sh`, `scripts/package-release.sh`, `scripts/homebrew-formula.sh` and
+  `scripts/npm-package.sh`,
   `release.sh`'s argument refusals (they run before its first step, so nothing is read
   or contacted), its build, sign, package and naming lines read from the script (the
   asset names come from `SHA256SUMS`), and `package-release.sh`'s refusal of an empty
   argument (it precedes the bsdtar check). On macOS, the `packaging` module runs
   `scripts/package-release.sh` on stub binaries: the tarball layout (`airs`, the
-  `airs-cli-rs` link, `README.md`, `LICENSE`, root-owned, 0755/0644, equal to their
-  sources), `SHA256SUMS`, the refusals (nothing written), the cleanup after a failed
+  `airs-cli` and `airs-cli-rs` links, `README.md`, `LICENSE`, `NOTICE`, root-owned,
+  0755/0644, equal to their sources), `SHA256SUMS`, the refusals (nothing written), the cleanup after a failed
   check, and `--verify-signature` with the real `codesign --verify --strict`: a copy of
   the Apple-signed `/usr/bin/true` passes and an unsigned stub fails (nothing is signed;
   the test notes a skip where `/usr/bin/codesign` cannot verify the copy). `release.sh --dry-run` itself needs `origin`, the
   Forgejo API and the keychain, so it is run by hand (RELEASING §2), never by a test.
+
+### 5.24 The npm channel (8.0, DESIGN §21.16)
+
+`tests/npm_package.rs` needs node (`AIRS_TS_NODE`, else `node` on `PATH`; npm is taken
+from node's directory) and never contacts a host other than loopback.
+
+- `the_launcher_tests_pass` runs `node --test npm/test/launcher.test.js` (also runnable
+  by hand): the platform table and the manifest's aliases, the refusals for unsupported
+  platforms and a missing platform package, and, on a supported host, a copy of the
+  launcher with a stub binary in its platform package: arguments, stdin, stdout, stderr
+  and exit codes pass through, the binary runs under its own name and gets
+  `AIRS_NPM_LAUNCHER`, a signal death is re-raised, and SIGTERM, SIGINT and SIGHUP sent
+  to the launcher (no terminal) reach the binary.
+- `npm_package_refuses_bad_input_and_writes_nothing` (everywhere): the argument
+  refusals (exit 2 with the usage) and a missing dist, a missing `SHA256SUMS`, one
+  listing other files and one that does not match (exit 1), with nothing written.
+- On macOS (the input tarballs come from `scripts/package-release.sh`, which needs
+  bsdtar), the `staging` module packages this build's `airs` and Linux stubs, runs
+  `scripts/npm-package.sh` and checks the staged manifests, the binaries, every packed
+  file list, `npm pack --dry-run` and `SHA256SUMS`; then
+  `an_install_from_the_staged_tarballs_runs_both_names` runs
+  `npm/test/install-check.mjs`, which serves the staged tarballs from a loopback
+  registry and installs `@cdot65/prisma-airs-cli` with `npm install --global` into a
+  temporary prefix (empty user and global npm configuration, private cache, no audit,
+  fund or update check): only the darwin-arm64 platform package is installed,
+  `airs --version` and `airs-cli --version` print the version, and doctor's `Executable`
+  check passes through the npm links.
 
 ## 6. The live tier
 

@@ -1,7 +1,10 @@
 # Migration: replacing the TypeScript `airs-cli`
 
 `airs-cli-rs` replaces the TypeScript CLI outright. No TypeScript is installed
-alongside it, and there is no dispatcher. The scope, drops, renames and roadmap are
+alongside it, and there is no dispatcher. From 8.0 it lives in the repository that held
+the TypeScript CLI, `cdot/prisma-airs-cli`, ships on npm as `@cdot65/prisma-airs-cli`
+(a launcher for prebuilt binaries) and answers to `airs-cli` as well as `airs` (DESIGN
+§21.15–§21.17, D330). The scope, drops, renames and roadmap are
 in [MILESTONES.md](MILESTONES.md); performance data is in [BENCHMARKS.md](BENCHMARKS.md).
 This page covers what a user and the `prisma-airs-harness` have to change.
 
@@ -9,7 +12,7 @@ Paths are abbreviated:
 
 | Prefix | Path |
 |---|---|
-| TS | `/Users/cdot/development/redtail/prisma-airs-cli` at 7.2.1-forgejo.0 (the frozen reference) |
+| TS | this repository's history at `5711012` (7.2.1-forgejo.0, the frozen reference; until 8.0 the separate checkout `/Users/cdot/development/redtail/prisma-airs-cli`) |
 | H | `/Users/cdot/development/cdot65/prisma-airs-harness` |
 | S | `/Users/cdot/development/redtail/scm-sdk-rs` |
 
@@ -34,8 +37,11 @@ ports it in 10 minor releases and renames the executable to `airs` at 1.0 (DESIG
 
 ### 2.1 Steps for a user
 
-1. Install the Rust CLI (`airs`) from a Forgejo release. Releases are signed and notarised
-   for macOS, and built as musl tarballs for Linux.
+1. Install the Rust CLI (`airs`) through one channel: Homebrew (`brew install airs-cli` from
+   the `cdot65/prisma-airs-cli` tap), npm from 8.0.0 (`npm install -g @cdot65/prisma-airs-cli`,
+   which replaces an npm 7.x install in place), crates.io (`cargo install --locked
+   airs-cli`) or a Forgejo release tarball (signed and notarised for macOS, static musl for
+   Linux). Mixing channels shadows one install with another (`airs doctor` warns, D331).
 2. After upgrading to 0.3, run `airs tenant import` once (DESIGN §3.12).
    - `airs tenant import --dry-run` first shows what would happen: one row per
      tenant with `import`, `replace` or `skip` and notes naming renamed, dropped and
@@ -66,10 +72,15 @@ ports it in 10 minor releases and renames the executable to `airs` at 1.0 (DESIG
    aren't read.
 5. Update scripts for the changes in §2.2.
 6. Uninstall the TypeScript package from every Node version
-   (`npm uninstall -g @cdot65/prisma-airs-cli`, and `pnpm` if it was used there).
+   (`npm uninstall -g @cdot65/prisma-airs-cli`, and `pnpm` if it was used there), unless
+   npm is the channel you keep: then `npm install -g @cdot65/prisma-airs-cli@latest`
+   (8.0.0 or later) replaces it with the Rust launcher. The 8.0 package exports no
+   JavaScript library.
 7. From 1.0 the Rust executable is `airs`, with `airs-cli-rs` as a compatibility name
-   through 1.x (DESIGN §21.2). There is no `airs-cli` name, so the TypeScript CLI's
-   `airs-cli` is never shadowed.
+   (DESIGN §21.2). In 1.x there was no `airs-cli` name, so the TypeScript CLI's `airs-cli`
+   was never shadowed. From 8.0 `airs-cli` is a name of the Rust CLI too (D330): it prints
+   exactly what `airs` prints, so 7.x scripts that run `airs-cli` get the Rust behaviour
+   described in §2.2.
 
 ### 2.2 What changes for scripts
 
@@ -80,11 +91,11 @@ Every row is pinned by a test listed in [COMPATIBILITY.md](COMPATIBILITY.md) §4
 | Renamed command groups | `aigateway` → `gateway` and `agentguard` → `supplychain`. Config keys are renamed too, and no aliases exist. |
 | Dropped commands | `completion`, `redteam judge`, `runtime dlp generate` |
 | Dropped formats | `--output markdown\|csv\|yaml` is a usage error (exit 2). A tenant `defaultOutput` that names one of them makes the config invalid. |
-| Version | `--version` reports `0.N.0` until 1.0 |
+| Version | `--version` reports `0.N.0` until 1.0, `1.0.0` for 1.0, and from 8.0.0 the one version shared by every channel |
 | Exit codes | Argument-parse errors exit 2, not 1, and usage is checked before the tenant is read (D1, D2, D18). Signals give 130/143. |
 | Scans fail closed | A failed scan prints `FAILED` and exits 1; TypeScript printed `ALLOW` and exited 0 (D6). Response detections count (D7). A scan is never re-sent (D9). |
 | Environment | No `PANW_*` credential fallback (D8). Timeout and debug variables are ignored (D31). `HTTPS_PROXY` and macOS system proxies are honoured (D36). Plain-http endpoints other than loopback are refused (D48). |
-| Doctor | 7 checks; server errors fail and rate limits warn (D19–D25). Each probe makes one attempt (D49). |
+| Doctor | 7 checks (8 from 0.10, 9 from 8.0: `Executable` first, D331); server errors fail and rate limits warn (D19–D25). Each probe makes one attempt (D49). |
 | Error text | Built from SDK metadata. Secrets and tokens are withheld (D11, D37, D38, D47). |
 | Pagination | A walk that can't finish fails closed instead of truncating (D15, D16, D40, D46). |
 | State locations | Tenants live in `~/.config/airs-cli/` (0.3, D70); `AIRS_CLI_CONFIG_DIR` moves them, and `PRISMA_AIRS_TENANTS_PATH` no longer selects tenants. Bulk-scan state and debug logs live in `~/.local/state/airs-cli/`. |

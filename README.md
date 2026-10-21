@@ -1,15 +1,15 @@
 # airs-cli
 
-airs-cli (the command `airs`) is a native Rust CLI for Prisma AIRS, a port of the
-TypeScript Prisma AIRS CLI (whose command is `airs-cli`). It is built on the published
-`scm-sdk` crate and is published on crates.io as `airs-cli`. `airs-cli-rs`, the 0.x
-command name, stays through 1.x only as a compatibility name that runs the same program.
-There is no `airs-cli` command here, so it runs side by side with the TypeScript CLI and
-both can be on `PATH` at once. From 0.3
-it keeps its own tenant store (TOML files under `~/.config/airs-cli/`) and creates,
-edits, selects and deletes tenants itself. It no longer reads the TypeScript CLI's
-registry; `tenant import` copies tenants from it once (see
-[Upgrading from 0.2](#upgrading-from-02)).
+airs-cli (the command `airs`) is a native Rust CLI for Prisma AIRS. It replaces the
+TypeScript Prisma AIRS CLI, which lived in this repository through 7.x (its sources stay
+in the git history and the `v7.*` tags). It is built on the published `scm-sdk` crate and
+is published on crates.io as `airs-cli`. The same program also answers to `airs-cli`, the
+TypeScript CLI's command name, so 7.x scripts keep working (from 8.0), and to
+`airs-cli-rs`, the Rust 0.x command name; every name prints the same output, and help and
+hints say `airs`. It keeps its own tenant store (TOML files under `~/.config/airs-cli/`)
+and creates, edits, selects and deletes tenants itself; `tenant import` copies tenants
+from the TypeScript CLI's registry once (see
+[Upgrading from the TypeScript CLI](#upgrading-from-the-typescript-cli-7x)).
 
 [docs/DESIGN.md](docs/DESIGN.md) is the behavioural contract. Its §12 lists every
 intentional difference from the TypeScript CLI. From 0.9.1 (scm-sdk 0.2.2) no command
@@ -22,7 +22,15 @@ unchanged (D306).
 Version 1.0.0 covers milestones 1–3, the M3.5 foundations, M4t tenant writes, M4 runtime
 writes, M5 bulk scanning, M6a Red Team, M6b DLP, M6c Model Security, M6d Runtime extras, M6e
 Gateway and M6f Supplychain, and renames the executable to `airs` (1.0, DESIGN §21;
-[docs/MILESTONES.md](docs/MILESTONES.md)):
+[docs/MILESTONES.md](docs/MILESTONES.md)).
+
+**The 8.0.0 plan.** This repository held the TypeScript CLI through 7.x; the Rust CLI moved
+in from `cdot/prisma-airs-cli-rs` (at `a9d7864`) and replaces it. The tree is still at
+1.0.0. The next release is **8.0.0**, the first from this repository and one version on
+every channel (crates.io, npm, Homebrew, the Forgejo release and the docs site): it adds
+the `airs-cli` name and the npm channel described below, and ports the TypeScript CLI
+7.3.0 changes (directional runtime security profiles) on `scm-sdk` 1.0.1. There is no
+1.0.1 or 1.1.0 release.
 
 | Milestone | Commands |
 |---|---|
@@ -49,13 +57,15 @@ Gateway and M6f Supplychain, and renames the executable to `airs` (1.0, DESIGN �
 TypeScript `aigateway` group is `gateway` here, with no `aigateway` alias, and `agentguard` is
 `supplychain`, with no `agentguard` alias.
 Prebuilt, signed binaries are attached to each
-[Forgejo release](https://git.cdot.io/cdot/prisma-airs-cli/releases).
+[Forgejo release](https://git.cdot.io/cdot/prisma-airs-cli/releases). The user
+documentation is at <https://cdot65.github.io/prisma-airs-cli/> (built from `docs-site/`).
 
 ## Install
 
-The command is `airs`. Every install path below also provides `airs-cli-rs`, the 1.x
-compatibility name: the same program, printing the same output. There is no `airs-cli`
-name, so the TypeScript CLI keeps its own.
+The command is `airs`. Install it through **one** channel; each one also provides the
+names `airs-cli` and `airs-cli-rs` (except npm, which provides `airs` and `airs-cli`), the
+same program printing the same output. The `airs-cli` name and the npm channel arrive
+with 8.0.0.
 
 **Homebrew** (macOS and Linux). The formula is in the public `cdot65/prisma-airs-cli`
 tap ([github.com/cdot65/homebrew-prisma-airs-cli](https://github.com/cdot65/homebrew-prisma-airs-cli))
@@ -70,12 +80,24 @@ brew install airs-cli
 brew upgrade airs-cli        # later releases
 ```
 
-It installs `airs` and links `airs-cli-rs` to it. The tap carries stable releases only.
-An install from the earlier Forgejo tap moves with `brew uninstall airs-cli` and
-`brew untap cdot/tap`, then the lines above.
+It installs `airs` and links `airs-cli` and `airs-cli-rs` to it. The tap carries stable
+releases only. An install from the earlier Forgejo tap moves with `brew uninstall airs-cli`
+and `brew untap cdot/tap`, then the lines above.
+
+**npm** (from 8.0.0; macOS on Apple Silicon, Linux x64 and arm64; Node 18 or newer):
+
+```sh
+npm install -g @cdot65/prisma-airs-cli
+```
+
+It installs the `airs` and `airs-cli` commands: a small launcher that runs the prebuilt
+binary from the matching platform package (an optional dependency; no install script,
+no download). Intel macOS, Windows and other platforms get an error naming the other
+ways to install. An npm 7.x install (the TypeScript CLI) is replaced by
+`npm install -g @cdot65/prisma-airs-cli@latest`; then run `airs tenant import` once.
 
 **From crates.io** (needs Rust 1.89 or newer). The crate is `airs-cli`; it installs
-`airs` and `airs-cli-rs` (a second copy of the same program, so the two cannot drift):
+`airs`, `airs-cli` and `airs-cli-rs` (copies of the same program, so they cannot drift):
 
 ```sh
 cargo install --locked airs-cli
@@ -85,15 +107,17 @@ cargo install --locked airs-cli
 x86_64 and arm64 are attached to each
 [Forgejo release](https://git.cdot.io/cdot/prisma-airs-cli/releases) (it needs a
 login), with a `SHA256SUMS` file. Each `airs-cli-<version>-<target>.tar.gz` holds
-`airs`, the `airs-cli-rs` link to it, `README.md` and `LICENSE`. The targets are
-`aarch64-apple-darwin`, `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`:
+`airs`, the `airs-cli` and `airs-cli-rs` links to it, `README.md`, `LICENSE` and `NOTICE`.
+The targets are `aarch64-apple-darwin`, `x86_64-unknown-linux-musl` and
+`aarch64-unknown-linux-musl`:
 
 ```sh
 shasum -a 256 -c SHA256SUMS --ignore-missing
 tar -xzf airs-cli-<version>-<target>.tar.gz
 mkdir -p ~/.local/bin
 install -m 0755 airs ~/.local/bin/airs
-ln -sf airs ~/.local/bin/airs-cli-rs      # the compatibility name, if you want it
+ln -sf airs ~/.local/bin/airs-cli         # the other names, if you want them
+ln -sf airs ~/.local/bin/airs-cli-rs
 ```
 
 `~/.local/bin` must be on `PATH`, and ahead of any other `airs` (see below).
@@ -105,24 +129,50 @@ needs access to the crates.io index.
 cargo build --release
 ```
 
-This produces `target/release/airs` (and `target/release/airs-cli-rs`, the same program
-under its 0.x name). On Apple Silicon it is a native arm64 executable. Copy it onto your
-`PATH`, or install it with `cargo install --path .`.
+This produces `target/release/airs` (and `target/release/airs-cli` and
+`target/release/airs-cli-rs`, the same program under its other names). On Apple Silicon
+it is a native arm64 executable. Copy it onto your `PATH`, or install it with
+`cargo install --path .`.
 
 ```sh
 airs --version     # prints the version, e.g. 1.0.0
 airs --help
 ```
 
-**Another `airs` on `PATH`.** Another program named `airs` (an unrelated npm package,
-for example) earlier on `PATH` wins by `PATH` order. Check which one runs with
-`type -a airs` and `airs --version` (this CLI prints a bare version such as `1.0.0`).
+**One channel, and another `airs` on `PATH`.** Channels shadow each other by `PATH`
+order. Homebrew's Node puts npm's global commands in `/opt/homebrew/bin`, where the
+Homebrew formula links `airs` and `airs-cli` too, so an npm install and a Homebrew install
+collide there; a 7.x TypeScript `airs-cli` or an unrelated npm package named `airs` may
+also come first. Check with `type -a airs airs-cli airs-cli-rs` and `airs --version`
+(this CLI prints a bare version such as `1.0.0`). `airs doctor` reports it: its first
+check, `Executable`, warns when another `airs`, `airs-cli` or `airs-cli-rs` earlier on
+`PATH` resolves to a different file than the running program (it never fails the run).
+Keep one channel and uninstall the others.
+
+## Upgrading from the TypeScript CLI (7.x)
+
+The TypeScript CLI ends at 7.x. Install the Rust CLI through one channel above (npm users
+can upgrade in place), then:
+
+1. Run `airs tenant import --dry-run`, then `airs tenant import`, once (below, and
+   [docs/MIGRATION.md](docs/MIGRATION.md)). The TypeScript files are only read.
+2. Update scripts: `aigateway` is `gateway` and `agentguard` is `supplychain` (no
+   aliases); `completion`, `redteam judge` and `runtime dlp generate` are dropped;
+   `--output markdown|csv|yaml` is a usage error (exit 2); argument-parse errors exit 2;
+   failed scans fail closed (exit 1). Every difference is a DESIGN §12 row.
+3. The `airs-cli` command keeps working and is now this program; help and hints name
+   `airs`. The npm package no longer exports a JavaScript library.
+4. Finish TypeScript bulk-scan jobs first and re-take backups with `airs`: their files
+   are not read.
+
+The upgrade guide on the docs site has the details:
+<https://cdot65.github.io/prisma-airs-cli/>.
 
 ## Upgrading to 1.0
 
-1. **The command is `airs`.** `airs-cli-rs` keeps working through 1.x and prints the
-   same output; switch scripts to `airs` at your pace. The TypeScript `airs-cli` is not
-   affected.
+1. **The command is `airs`.** `airs-cli-rs` keeps working and prints the same output;
+   switch scripts to `airs` at your pace. (In 1.x the TypeScript `airs-cli` was not
+   affected; from 8.0 `airs-cli` is this program, see above.)
 2. **Nothing to migrate.** Tenants (`~/.config/airs-cli/`), debug logs, bulk-scan jobs,
    backups and the fetched uv stay where they are, in the same formats: a 0.x bulk-scan
    job resumes under 1.0, and 0.x backups restore.
@@ -1058,14 +1108,18 @@ The TypeScript CLI exits 1 on argument-parse errors (D1).
 
 ## Documentation
 
+- <https://cdot65.github.io/prisma-airs-cli/>: the user documentation (install, upgrading
+  from the TypeScript CLI, configuration, one page per command family and a command
+  reference generated from `--help`), built from [docs-site/](docs-site/). The SDK's site
+  is <https://cdot65.github.io/scm-sdk-rs/>.
 - [docs/DESIGN.md](docs/DESIGN.md): the contract. Exact messages, exit codes, request
   shapes, and in §12 every intentional difference from `airs-cli`.
 - [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md): each behaviour and each §12 row,
   with the tests that pin it.
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md): measured performance of both CLIs, on
   loopback and live.
-- [docs/MIGRATION.md](docs/MIGRATION.md): taking over the `airs-cli` name, retiring
-  the TypeScript CLI, and moving `prisma-airs-harness` to Rust.
+- [docs/MIGRATION.md](docs/MIGRATION.md): moving from the TypeScript CLI, taking over
+  the `airs-cli` name, and moving `prisma-airs-harness` to Rust.
 - [docs/TESTING.md](docs/TESTING.md): the test tiers, the TypeScript reference build,
   the live comparison and how to add tests.
 - [docs/MILESTONES.md](docs/MILESTONES.md): release scope and later milestones.
@@ -1078,8 +1132,11 @@ The TypeScript CLI exits 1 on argument-parse errors (D1).
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-scripts/build-reference-cli.sh                     # once: the pinned TypeScript reference
+scripts/build-reference-cli.sh                     # once: the pinned TypeScript reference (this repository's history)
 AIRS_REQUIRE_PARITY=1 cargo test --workspace
+node --test npm/test/launcher.test.js              # the npm launcher (also run by cargo test)
+scripts/cli-reference.sh                           # regenerate the docs site's command reference
+pnpm -C docs-site install --frozen-lockfile && pnpm -C docs-site build   # the docs site
 ```
 
 See [docs/TESTING.md](docs/TESTING.md) for details. The live tier (a real tenant; the

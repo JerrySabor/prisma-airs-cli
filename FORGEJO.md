@@ -5,14 +5,23 @@ Open new issues and pull requests there. GitHub is a public source mirror;
 historical GitHub pull requests remain available, and their open heads were
 preserved as `archive/github-pr-N` branches in Forgejo.
 
-Forgejo owns CI and release authorization. GitHub package and container workflows
-are retained as `.disabled` files for historical reference; do not re-enable them.
-GitHub Pages remains at its existing URL. Documentation is deployed only from an
-`airs-docs-<full commit SHA>` tag approved in Forgejo and copied by the push mirror.
-The GitHub Pages job verifies that the tag matches the exact source commit.
+From 8.0 this repository holds the Rust CLI (crate `airs-cli`, command `airs`), which
+replaced the TypeScript CLI; the TypeScript sources stay in the history and the `v7.*`
+tags, which must never be deleted (the parity tests build the reference from them).
+`cdot/prisma-airs-cli-rs`, where the Rust CLI was developed, is archived after the move.
 
-Package destinations remain npmjs.org for the SDK/CLI and npm.cdot.io for Harness.
-Migration acceptance uses a separate prerelease channel and preserves `latest`.
+Forgejo owns CI and release authorization (`.forgejo/workflows/ci.yml`, docs/TESTING.md
+§10; releases: docs/RELEASING.md). The TypeScript-era GitHub package and container
+workflows were removed with the TypeScript CLI. GitHub Pages remains at its existing URL.
+Documentation is deployed only from an `airs-docs-<full commit SHA>` tag approved in
+Forgejo (`.forgejo/workflows/docs-release.yml`, which requires the CI jobs to be green)
+and copied by the push mirror. The GitHub Pages job verifies that the tag matches the
+exact source commit.
+
+Package destinations: crates.io (`airs-cli`), npmjs.org (`@cdot65/prisma-airs-cli`, from
+8.0 a launcher for prebuilt binaries), the Homebrew tap `cdot65/homebrew-prisma-airs-cli`
+on GitHub, and npm.cdot.io for Harness. The npm dist-tags `latest` and `next` move to
+each Rust release; `forgejo-preview` is left alone (docs/RELEASING.md §7).
 The npm publishing credential is held at Conjur
 `data/airs-release-bot/npmjs/token`; never put its value in source or logs.
 Direct granular-token publishing is a temporary bridge: npm removes it in

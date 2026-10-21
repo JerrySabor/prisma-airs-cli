@@ -1,17 +1,21 @@
 # Releasing airs-cli
 
-Releases are cut by the maintainer on an Apple Silicon Mac. A release has three parts,
-in this order:
+Releases are cut by the maintainer on an Apple Silicon Mac, from `cdot/prisma-airs-cli`
+(the Rust CLI moved here from `cdot/prisma-airs-cli-rs` for 8.0). From 8.0.0 one version
+is used everywhere: the crate, `airs --version`, the tag, the Forgejo release, the Homebrew
+formula and npm. A release has four parts, in this order:
 
 1. **The Forgejo release** (`scripts/release.sh`): builds the `airs` executable for
-   three targets, signs and notarises the macOS one, packages each with the
-   `airs-cli-rs` compatibility link (`scripts/package-release.sh`), uploads everything
+   three targets, signs and notarises the macOS one, packages each with the `airs-cli`
+   and `airs-cli-rs` links and `NOTICE` (`scripts/package-release.sh`), uploads everything
    to a draft Forgejo release, pushes the tag and publishes the draft.
 2. **The crates.io publish** (`cargo publish -p airs-cli`, §2 step 7), from the tagged
    commit: a published version can only be yanked, so it follows a release that
    succeeded.
 3. **The Homebrew formula** (§6): rendered from the published crate and committed to
-   the tap. It builds from the crates.io crate and needs its checksum, so it comes last.
+   the tap. It builds from the crates.io crate and needs its checksum.
+4. **The npm packages** (§7): staged from the release tarballs by
+   `scripts/npm-package.sh`, then published, platform versions first.
 
 Signing moves to the `jadzia` runner later ([MILESTONES.md](MILESTONES.md),
 "Dependencies and releases"); that runner must first meet the self-hosted runner
@@ -36,12 +40,13 @@ One-time setup on the release Mac:
 | zig and cargo-zigbuild | `zig version`, `cargo-zigbuild --version` | `brew install zig`, `cargo install --locked cargo-zigbuild` |
 | Node 24 and the TypeScript reference | `scripts/build-reference-cli.sh --verify` | `scripts/build-reference-cli.sh` ([TESTING.md](TESTING.md) §3) |
 | `jq` | `jq --version` | `brew install jq` (macOS 15 and later ship `/usr/bin/jq`) |
-| bsdtar | `tar --version` starts `bsdtar` | the macOS `/usr/bin/tar`; the packaging stores the `airs-cli-rs` link and drops macOS metadata with it |
+| bsdtar | `tar --version` starts `bsdtar` | the macOS `/usr/bin/tar`; the packaging stores the `airs-cli` and `airs-cli-rs` links and drops macOS metadata with them |
 | Developer ID certificate | `security find-identity -v -p codesigning` lists `Developer ID Application: Calvin Remsburg (G5QLZ5A8TA)` | Install the certificate and its private key in the login keychain. `AIRS_SIGN_IDENTITY` overrides the identity. |
 | Notary credentials | `xcrun notarytool history --keychain-profile airs-cli-notary` | `xcrun notarytool store-credentials airs-cli-notary --apple-id <id> --team-id G5QLZ5A8TA` (it prompts for an app-specific password). `AIRS_NOTARY_PROFILE` overrides the profile name. |
 | Forgejo token | `security find-generic-password -s airs-cli-forgejo >/dev/null` (without `-w`, so the token is not shown) | Create a token with the `write:repository` scope, then `security add-generic-password -s airs-cli-forgejo -a <user> -w` (it prompts for the token). A token without write scope fails at the draft release, before the tag is pushed. |
 | ssh push access to `origin` | `git ls-remote origin` | |
 | crates.io login | `cargo publish --dry-run -p airs-cli` gets past the upload check | `cargo login` |
+| npm login (§7) | `npm whoami` prints the publishing user (without printing a token) | the publishing token is held at Conjur `data/airs-release-bot/npmjs/token` (FORGEJO.md); put it in a private npm user config (`npm_config_userconfig` pointing at a 0600 file), never on a command line or in the repository |
 | Homebrew and the tap (§6) | `brew --repository cdot65/prisma-airs-cli` prints a path | `brew tap cdot65/prisma-airs-cli`, `brew trust cdot65/prisma-airs-cli` and `gh auth setup-git` (push access to the GitHub tap repository) |
 
 Never pass the token or the app-specific password on a command line, and never run the
@@ -70,6 +75,7 @@ script under `set -x` or `bash -x`.
 8. Render the Homebrew formula from the published crate, check it and commit it to the
    tap (§6). A pre-release (`1.1.0-rc.1`) gets no formula: the tap carries stable
    releases only.
+9. Stage and publish the npm packages from the release tarballs (§7).
 
 ## 3. What the script does
 
@@ -83,7 +89,7 @@ Each step is printed before it runs. The script stops at the first error.
 | Builds: `cargo build --release --bin airs` for `aarch64-apple-darwin`, `cargo zigbuild --release --bin airs` for both musl targets (only `airs` is built: the compatibility name is a link in the tarball); checks the file type of each `target/<target>/release/airs` and the macOS `--version` | runs | runs |
 | Sign `airs`: `codesign --force --options runtime --timestamp --sign <identity>`, then `codesign --verify --strict` and a check for the Developer ID authority, the secure timestamp, the hardened runtime and `Identifier=airs` | runs | printed only |
 | Notarise: `ditto -c -k --keepParent` of `airs` into a zip, `xcrun notarytool submit --keychain-profile airs-cli-notary --wait`; a non-zero exit or anything but `Accepted` prints the submission id and the notary log (when notarytool returned an id) and stops | runs (skipped by `--skip-notarize`) | printed only |
-| Package (`scripts/package-release.sh`): `target/dist/<version>/airs-cli-<version>-<target>.tar.gz`, each holding exactly `airs` (0755), `airs-cli-rs` (a relative symlink to `airs`), `README.md` and `LICENSE` (0644), root-owned, and `SHA256SUMS` of the three tarballs. Each tarball is then listed and extracted into `.verify/` to check the entries and their order, the link target, the modes, the owner and that the files equal their sources; the macOS `./airs --version` and `./airs-cli-rs --version` must print the version | runs; then `codesign --verify --strict` on the extracted macOS `airs` (the signature survived packaging) | runs, without the signature check (printed); the directory gets a `DRY-RUN` marker because its macOS binary is unsigned |
+| Package (`scripts/package-release.sh`): `target/dist/<version>/airs-cli-<version>-<target>.tar.gz`, each holding exactly `airs` (0755), `airs-cli` and `airs-cli-rs` (relative symlinks to `airs`), `README.md`, `LICENSE` and `NOTICE` (0644), root-owned, and `SHA256SUMS` of the three tarballs. Each tarball is then listed and extracted into `.verify/` to check the entries and their order, the link targets, the modes, the owner and that the files equal their sources; the macOS `./airs --version`, `./airs-cli --version` and `./airs-cli-rs --version` must print the version | runs; then `codesign --verify --strict` on the extracted macOS `airs` (the signature survived packaging) | runs, without the signature check (printed); the directory gets a `DRY-RUN` marker because its macOS binary is unsigned |
 | Draft release: create a draft release on Forgejo with the notes (a draft creates no tag and is not public), upload the three tarballs and `SHA256SUMS` (up to three attempts each; an asset already on the draft with the local size counts as uploaded, so a retry never duplicates it), check the asset count | runs | printed only |
 | Tag: `git tag -a v<version>` and `git push origin refs/tags/v<version>` | runs | printed only |
 | Publish: `PATCH` the draft to `draft: false`; the release is named `airs-cli <version>` (so is the tag message), and the last line names the next steps (`cargo publish -p airs-cli`, then `scripts/homebrew-formula.sh <version>`) | runs | printed only |
@@ -124,15 +130,16 @@ Notes:
 
 ```sh
 shasum -a 256 -c SHA256SUMS --ignore-missing
-tar -tvzf airs-cli-<version>-aarch64-apple-darwin.tar.gz   # airs, airs-cli-rs -> airs, README.md, LICENSE
+tar -tvzf airs-cli-<version>-aarch64-apple-darwin.tar.gz   # airs, airs-cli -> airs, airs-cli-rs -> airs, README.md, LICENSE, NOTICE
 tar -xzf airs-cli-<version>-aarch64-apple-darwin.tar.gz
 codesign --verify --strict --verbose=2 airs
 codesign -dvv airs 2>&1 | grep -E '^(Identifier|Authority|TeamIdentifier|Timestamp)='
 ./airs --version
+./airs-cli --version
 ./airs-cli-rs --version
 ```
 
-Both print the bare version. `Identifier=airs` is the signed file's name.
+All three print the bare version. `Identifier=airs` is the signed file's name.
 
 ## 5. Recovery
 
@@ -259,8 +266,8 @@ unset HOMEBREW_NO_AUTO_UPDATE
   (replacing an earlier render whole). It refuses a pre-release. `--checksum <sha256>`
   or `--metadata-file <saved answer>` render without the network, and `--output <path>`
   or `--output -` write elsewhere; `--help` prints the usage.
-- `brew test` runs the formula's `test do` block: `airs --version` and the
-  `airs-cli-rs` link's `--version` print the version, and `airs tenant list --output
+- `brew test` runs the formula's `test do` block: `airs --version` and the `airs-cli`
+  and `airs-cli-rs` links' `--version` print the version, and `airs tenant list --output
   json` on an empty store prints `[]` (no request is sent).
 - `brew audit --strict` must report nothing.
 - `HOMEBREW_NO_AUTO_UPDATE=1` keeps `brew install` and `brew upgrade` from updating the
@@ -280,3 +287,52 @@ brew trust cdot65/prisma-airs-cli
 brew install airs-cli
 brew upgrade airs-cli
 ```
+
+## 7. npm
+
+From 8.0.0, `@cdot65/prisma-airs-cli` on npm is a binary-distribution channel in the
+layout of `@openai/codex` (DESIGN §21.16): the launcher version `<version>` (the `airs` and
+`airs-cli` commands) and one platform version per target, `<version>-darwin-arm64`,
+`<version>-linux-x64` and `<version>-linux-arm64`, which the launcher depends on as
+aliased optional dependencies. Each platform version holds exactly the released binary:
+the signed, notarised macOS build and the static musl Linux builds from the Forgejo
+release.
+
+**Stage** after the Forgejo release (the tarballs and `SHA256SUMS` in
+`target/dist/<version>/`, or downloaded release assets with `--dist`):
+
+```sh
+scripts/npm-package.sh --verify-signature <version>     # writes target/npm/<version>/
+cat target/npm/<version>/SHA256SUMS
+```
+
+It checks the tarballs against `SHA256SUMS`, stages and packs the four packages, checks
+their contents and never publishes. `tests/npm_package.rs` installs packages staged the
+same way from a loopback registry and runs `airs --version` and `airs-cli --version`.
+
+**Publish**, only when every check, review and CI job is green. The dist-tags today are
+`latest` 7.0.1, `next` 7.3.0 and `forgejo-preview` 7.2.1-forgejo.0. With the npm user
+configuration of §1:
+
+1. **The platform versions first**, so the launcher never points at a missing version.
+   npm needs a tag for each publish; use `next`, which step 4 moves anyway, so no new
+   dist-tag is created:
+
+   ```sh
+   cd target/npm/<version>
+   npm publish cdot65-prisma-airs-cli-<version>-darwin-arm64.tgz --tag next
+   npm publish cdot65-prisma-airs-cli-<version>-linux-x64.tgz --tag next
+   npm publish cdot65-prisma-airs-cli-<version>-linux-arm64.tgz --tag next
+   ```
+
+2. **Then the launcher**: `npm publish cdot65-prisma-airs-cli-<version>.tgz --tag latest`.
+3. **`latest`** is now `<version>`: check with `npm view @cdot65/prisma-airs-cli dist-tags`.
+4. **Move `next`** to the same version:
+   `npm dist-tag add @cdot65/prisma-airs-cli@<version> next`.
+5. **Leave `forgejo-preview` alone.**
+
+Never unpublish: a published version is immutable; fix a bad release with the next patch
+version. Verify with `npm install -g @cdot65/prisma-airs-cli` on this Mac and in Linux x64
+and arm64 containers (`airs --version` and `airs-cli --version` print `<version>`), and
+from an npm 7.x install with `npm i -g @cdot65/prisma-airs-cli@latest` (the `airs-cli`
+command must keep working).
