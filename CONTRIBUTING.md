@@ -1,1 +1,0 @@
-New issues and pull requests belong on **Forgejo**, our canonical source. See [repository authority and release workflow](FORGEJO.md). GitHub is a public mirror; documentation remains on GitHub Pages.
