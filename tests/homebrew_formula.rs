@@ -18,7 +18,7 @@ const CHECKSUM: &str = "952a1b3582f98b3f6a3905961058383445aa07e298b51805f5e08e53
 const FIXTURE: &str = "tests/fixtures/homebrew/airs-cli-1.0.0.rb";
 const METADATA: &str = "tests/fixtures/homebrew/crates-io-airs-cli-1.0.0.json";
 const TEMPLATE: &str = "packaging/homebrew/airs-cli.rb.in";
-const USER_AGENT: &str = "airs-cli-homebrew-formula (+https://git.cdot.io/cdot/prisma-airs-cli-rs)";
+const USER_AGENT: &str = "airs-cli-homebrew-formula (+https://git.cdot.io/cdot/prisma-airs-cli)";
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -15,7 +15,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CRATE="airs-cli"
 TEMPLATE="$ROOT/packaging/homebrew/airs-cli.rb.in"
 DEFAULT_OUTPUT="$ROOT/target/homebrew/Formula/airs-cli.rb"
-USER_AGENT="airs-cli-homebrew-formula (+https://git.cdot.io/cdot/prisma-airs-cli-rs)"
+USER_AGENT="airs-cli-homebrew-formula (+https://git.cdot.io/cdot/prisma-airs-cli)"
 # 64 MiB: far above the crate's size, a bound on what a broken answer can make us store.
 MAX_CRATE_BYTES=67108864
 

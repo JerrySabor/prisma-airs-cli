@@ -179,7 +179,7 @@ does: `printf` is a shell builtin, so the token never appears in a process's arg
 and is never printed.
 
 ```sh
-api=https://git.cdot.io/api/v1/repos/cdot/prisma-airs-cli-rs
+api=https://git.cdot.io/api/v1/repos/cdot/prisma-airs-cli
 fj() {
   printf 'header = "Authorization: token %s"\n' \
     "$(security find-generic-password -s airs-cli-forgejo -w)" | curl -sS -K - "$@"
@@ -252,7 +252,7 @@ unset HOMEBREW_NO_AUTO_UPDATE
 
 - `scripts/homebrew-formula.sh <version>` asks crates.io's public API for the version
   (no credential; `curl -q`, so no `.curlrc` is read, with https only and the user agent
-  `airs-cli-homebrew-formula (+https://git.cdot.io/cdot/prisma-airs-cli-rs)`), refuses
+  `airs-cli-homebrew-formula (+https://git.cdot.io/cdot/prisma-airs-cli)`), refuses
   a version that is missing, yanked or has no checksum, downloads the `.crate` file and
   requires its SHA-256 to equal the API's, then renders
   `packaging/homebrew/airs-cli.rb.in` into `target/homebrew/Formula/airs-cli.rb`

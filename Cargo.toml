@@ -6,7 +6,8 @@ resolver = "3"
 edition = "2024"
 rust-version = "1.89"
 license = "Apache-2.0"
-repository = "https://git.cdot.io/cdot/prisma-airs-cli-rs"
+repository = "https://git.cdot.io/cdot/prisma-airs-cli"
+homepage = "https://cdot65.github.io/prisma-airs-cli/"
 authors = ["Calvin Remsburg"]
 
 [workspace.lints.rust]
@@ -24,6 +25,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
 readme = "README.md"
 keywords = ["prisma-airs", "ai-security", "cli", "paloaltonetworks"]

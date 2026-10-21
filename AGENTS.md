@@ -1,10 +1,14 @@
 # airs-cli-rs contributor contract
 
-`airs-cli-rs` is a native Rust port of the TypeScript `airs-cli`
-(`../prisma-airs-cli`). It is built on the published `scm-sdk` crate (exact pin
-`=0.2.3`, imported as `scm`). The goal is full parity without the TypeScript CLI: the
-pinned reference commit is a frozen spec, not a companion. The scope, the drops and
-renames, and the milestone order are recorded in
+`airs-cli-rs` is a native Rust port of the TypeScript `airs-cli`, and it replaces it:
+this repository, `cdot/prisma-airs-cli`, held the TypeScript CLI until 7.x, and from 8.0
+it holds the Rust CLI (crate `airs-cli`, command `airs`). The TypeScript reference is
+this repository's own history at the commit pinned in `scripts/build-reference-cli.sh`
+(the TypeScript sources are no longer in the tree; they stay in the history and in every
+`v7.*` tag, which must never be deleted). It is built on the published `scm-sdk` crate
+(exact pin `=0.2.3`, imported as `scm`). The goal is full parity without the TypeScript
+CLI: the pinned reference commit is a frozen spec, not a companion. The scope, the drops
+and renames, and the milestone order are recorded in
 [docs/MILESTONES.md](docs/MILESTONES.md).
 
 Read [docs/DESIGN.md](docs/DESIGN.md) before changing behaviour. It is the binding
@@ -94,4 +98,6 @@ fails when a cited test, a §12 row or a `dNN`-named parity test is missing from
   stores under the sandbox's `tmp/live-stores/`, never the shared `target/live/`. Keep the scan series
   stopping at the first scan that does not complete, so a failing tenant is not sent
   every planned scan.
-- Do not modify the sibling TypeScript checkout or the SDK checkout.
+- Never check out the TypeScript reference in the working tree, rewrite the history it
+  lives in, or delete a `v7.*` tag: the parity harness builds the reference from that
+  history into `.reference/` (docs/TESTING.md §3). Do not modify the SDK checkout.

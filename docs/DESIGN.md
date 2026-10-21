@@ -16357,7 +16357,7 @@ npm package) wins by `PATH` order; README says how to check (§21.10).
 | File names | `airs-…` report, backup and debug-log names (`airs-gateway-report-…`, `airs-redteam-targets-…`, …) |
 | Product texts | `ROOT_ABOUT` (`Native Prisma AIRS CLI: …`), report titles and the footer `Prisma AIRS CLI · …`, banners, the `AI Gateway` and `AgentGuard` product lines |
 | Requests | the SDK user agent `PAN-AIRS/<sdk version>-rust-sdk` on every API request, the debug operation names `airs.*` |
-| Names | the crate `airs-cli`, the library `airs_cli_rs`, the repository `prisma-airs-cli-rs`, the Forgejo API paths, the keychain items `airs-cli-forgejo` and `airs-cli-notary` |
+| Names | the crate `airs-cli`, the library `airs_cli_rs`, the repository `prisma-airs-cli-rs` (from 8.0 the Rust CLI lives in `cdot/prisma-airs-cli`, which replaced the TypeScript CLI there, and the Forgejo API paths name it; `cdot/prisma-airs-cli-rs` is archived after the move), the keychain items `airs-cli-forgejo` and `airs-cli-notary` |
 
 ### 21.4 Program-name texts by family
 
@@ -16551,7 +16551,7 @@ scripts/homebrew-formula.sh <version> [--checksum <sha256> | --metadata-file <pa
 - **Checksum source**, in order: `--checksum <sha256>` (64 lowercase hex, else exit 2); `--metadata-file <path>` (a
   saved crates.io version answer, read with `jq`); otherwise crates.io: `curl -q -sS --fail --proto '=https'
   --proto-redir '=https' --tlsv1.2 --max-time 30 -A 'airs-cli-homebrew-formula
-  (+https://git.cdot.io/cdot/prisma-airs-cli-rs)' https://crates.io/api/v1/crates/airs-cli/<version>`. The answer
+  (+https://git.cdot.io/cdot/prisma-airs-cli)' https://crates.io/api/v1/crates/airs-cli/<version>` (the repository named `cdot/prisma-airs-cli-rs` until 8.0). The answer
   must have `.version.crate == "airs-cli"`, `.version.num == <version>`, `.version.yanked == false` and a
   `.version.checksum` of 64 lowercase hex; any other answer is `homebrew-formula: crates.io has no usable airs-cli
   <version> (<which check failed>)`, exit 1, where the check is the first of `no version object`, `the crate is not

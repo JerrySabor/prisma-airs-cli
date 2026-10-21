@@ -20,8 +20,8 @@ umask 022
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-API="https://git.cdot.io/api/v1/repos/cdot/prisma-airs-cli-rs"
-WEB="https://git.cdot.io/cdot/prisma-airs-cli-rs"
+API="https://git.cdot.io/api/v1/repos/cdot/prisma-airs-cli"
+WEB="https://git.cdot.io/cdot/prisma-airs-cli"
 KEYCHAIN_ITEM="airs-cli-forgejo"
 SIGN_IDENTITY="${AIRS_SIGN_IDENTITY:-Developer ID Application: Calvin Remsburg (G5QLZ5A8TA)}"
 NOTARY_PROFILE="${AIRS_NOTARY_PROFILE:-airs-cli-notary}"

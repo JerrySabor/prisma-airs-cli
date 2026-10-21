@@ -49,7 +49,7 @@ Gateway and M6f Supplychain, and renames the executable to `airs` (1.0, DESIGN Â
 TypeScript `aigateway` group is `gateway` here, with no `aigateway` alias, and `agentguard` is
 `supplychain`, with no `agentguard` alias.
 Prebuilt, signed binaries are attached to each
-[Forgejo release](https://git.cdot.io/cdot/prisma-airs-cli-rs/releases).
+[Forgejo release](https://git.cdot.io/cdot/prisma-airs-cli/releases).
 
 ## Install
 
@@ -83,7 +83,7 @@ cargo install --locked airs-cli
 
 **Prebuilt binaries** for Apple Silicon macOS (signed and notarised) and static Linux
 x86_64 and arm64 are attached to each
-[Forgejo release](https://git.cdot.io/cdot/prisma-airs-cli-rs/releases) (it needs a
+[Forgejo release](https://git.cdot.io/cdot/prisma-airs-cli/releases) (it needs a
 login), with a `SHA256SUMS` file. Each `airs-cli-<version>-<target>.tar.gz` holds
 `airs`, the `airs-cli-rs` link to it, `README.md` and `LICENSE`. The targets are
 `aarch64-apple-darwin`, `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`:
