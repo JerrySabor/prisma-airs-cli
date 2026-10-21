@@ -1,10 +1,10 @@
 //! TS-vs-Rust parity tests for `doctor` (DESIGN §9, §12 D19–D25 and related rows).
 //!
 //! Each scenario runs against BOTH CLIs, each on a fresh sandbox and fixture server.
-//! The TypeScript doctor has 11 checks and Rust has 8 (D19), so the comparison is on
+//! The TypeScript doctor has 11 checks and Rust has 9 (D19), so the comparison is on
 //! the intersection of the seven shared check names, by status, detail and hint; the
-//! Rust `Gateway API` check (TS `AI Gateway API`, D227, D250) is compared in its own
-//! tests. Paths are compared after replacing each sandbox root with `<ROOT>`. Request
+//! Rust `Gateway API` check (TS `AI Gateway API`, D227, D250) and the Rust-only
+//! `Executable` check (D331) are compared in their own tests. Paths are compared after replacing each sandbox root with `<ROOT>`. Request
 //! logs are compared normalised: the Rust log without its `Gateway API` probe must equal
 //! the start of the TS log, and the TS remainder may only be its AI Gateway probe (a
 //! second `token`, then the data-plane workspaces; Rust shares the first token, choice
@@ -49,8 +49,10 @@ const TS_NAMES: [&str; 11] = [
     "AI Gateway API",
     "Typesafe API",
 ];
-/// The Rust checks: the shared seven and `Gateway API` (D19, §19.16).
-const RUST_NAMES: [&str; 8] = [
+/// The Rust checks: `Executable` (D331), the shared seven and `Gateway API` (D19,
+/// §19.16).
+const RUST_NAMES: [&str; 9] = [
+    "Executable",
     "Tenant",
     "Config file",
     "Environment",
@@ -427,8 +429,15 @@ mod agree {
             .filter(|(name, ..)| NAMES.contains(&name.as_str()))
             .cloned()
             .collect();
-        assert_eq!(rust_pretty.checks.len(), 8);
-        for (rust_line, ts_line) in rust_pretty.checks.iter().zip(&ts_lines) {
+        assert_eq!(rust_pretty.checks.len(), 9);
+        let rust_lines: Vec<_> = rust_pretty
+            .checks
+            .iter()
+            .filter(|(name, ..)| NAMES.contains(&name.as_str()))
+            .cloned()
+            .collect();
+        assert_eq!(rust_lines.len(), ts_lines.len());
+        for (rust_line, ts_line) in rust_lines.iter().zip(&ts_lines) {
             let line = rust_line
                 .1
                 .strip_suffix(PROXY_SUFFIX)
@@ -505,13 +514,17 @@ mod agree {
                 side.out.cli
             );
         }
-        let rust_tenant = &parse_pretty(&rust.stdout()).checks[0];
+        let rust_tenant = parse_pretty(&rust.stdout())
+            .checks
+            .into_iter()
+            .find(|check| check.0 == "Tenant")
+            .unwrap_or_else(|| panic!("Rust Tenant line"));
         let ts_tenant = parse_pretty(&ts.stdout())
             .checks
             .into_iter()
             .find(|check| check.0 == "Tenant")
             .unwrap_or_else(|| panic!("TS Tenant line"));
-        assert_eq!(*rust_tenant, ts_tenant);
+        assert_eq!(rust_tenant, ts_tenant);
     }
 
     #[test]
@@ -831,10 +844,49 @@ mod agree {
 mod divergence {
     use super::*;
 
+    /// D331: the Rust doctor's first check, `Executable`, warns when another `airs`,
+    /// `airs-cli` or `airs-cli-rs` earlier on `PATH` is a different program (here an old
+    /// `airs-cli` such as the TypeScript CLI's npm link); the TypeScript doctor has no
+    /// such check and never looks at `PATH`. The warning changes neither exit code.
+    #[test]
+    fn d331_the_executable_check_is_rust_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("d331-bin-{}", std::process::id()));
+        std::fs::create_dir_all(&bin).unwrap();
+        let other = bin.join("airs-cli");
+        std::fs::write(&other, "#!/bin/sh\necho typescript\n").unwrap();
+        std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        let Some((rust, ts)) = both(
+            "d331",
+            &healthy,
+            &json_args(),
+            RunOptions::new().env("PATH", path.as_str()),
+        ) else {
+            return;
+        };
+        assert_eq!((rust.out.code, ts.out.code), (0, 0));
+        let executable = rust.check("Executable");
+        assert_eq!(executable.status, "warn");
+        assert_eq!(
+            executable.detail,
+            format!(
+                "airs-cli on PATH is another program: {}",
+                std::fs::canonicalize(&other).unwrap().display()
+            )
+        );
+        assert_eq!(names(&rust.checks()), RUST_NAMES);
+        assert_eq!(names(&ts.checks()), TS_NAMES);
+        assert!(ts.checks().iter().all(|check| check.name != "Executable"));
+        assert_checks_agree(&rust, &ts, &[]);
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
     #[test]
     fn d19_check_sets() {
-        // D19: TS reports 11 checks, Rust 8: the 7 shared ones in the same relative order
-        // and `Gateway API` (TS `AI Gateway API`, D227) last.
+        // D19: TS reports 11 checks, Rust 9: `Executable` first (D331), the 7 shared ones in
+        // the same relative order and `Gateway API` (TS `AI Gateway API`, D227) last.
         let Some((rust, ts)) = both("d19", &healthy, &json_args(), RunOptions::new()) else {
             return;
         };
@@ -920,7 +972,7 @@ mod divergence {
     /// Like `assert_checks_agree` without the exit-code comparison.
     fn assert_checks_agree_except_code(rust: &Side, ts: &Side, except: &[&str]) {
         let ts_checks = intersection(&ts.checks());
-        for (rust_check, ts_check) in rust.checks().iter().zip(&ts_checks) {
+        for (rust_check, ts_check) in intersection(&rust.checks()).iter().zip(&ts_checks) {
             if !except.contains(&rust_check.name.as_str()) {
                 assert_eq!(
                     strip_proxy(rust_check),
@@ -1212,7 +1264,7 @@ mod divergence {
             "Cannot read tenant registry at <REGISTRY>; restore a valid registry before proceeding"
         );
         assert_eq!(
-            rust.raw.json()[0]["hint"],
+            rust.raw.json()[1]["hint"],
             format!("Fix or restore {}/store/config.toml", rust.root)
         );
         assert_eq!(
@@ -1223,7 +1275,7 @@ mod divergence {
         );
         // Every later check is notEvaluated on both (including the probes).
         let ts_checks = intersection(&ts.checks());
-        for (rust_check, ts_check) in rust.checks().iter().zip(&ts_checks).skip(1) {
+        for (rust_check, ts_check) in intersection(&rust.checks()).iter().zip(&ts_checks).skip(1) {
             assert_eq!(rust_check, ts_check);
             assert_eq!(rust_check.detail, NOT_EVALUATED);
         }
@@ -2208,7 +2260,7 @@ mod store {
         };
         assert_eq!(ts.check("Tenant").status, "pass", "{:?}", ts.out);
         assert_eq!(
-            rust.raw.json()[0],
+            rust.raw.json()[1],
             json!({
                 "name": "Tenant",
                 "status": "fail",

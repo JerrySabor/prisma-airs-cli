@@ -234,6 +234,60 @@ fn d326_the_program_is_airs_with_a_compatibility_name() {
     }
 }
 
+/// D330: from 8.0 `airs-cli` is also a name of the Rust CLI (the TypeScript CLI it
+/// replaces was `airs-cli`). Where the TypeScript `airs-cli` printed `Usage: airs-cli` and
+/// `$ airs-cli …` examples, the Rust `airs-cli` prints the same bytes as `airs`: usage
+/// lines, examples and hints name `airs` (D73), and `--version` is the Rust version.
+#[test]
+fn d330_airs_cli_is_a_name_of_the_rust_cli() {
+    let Some(ts) = require_ts("d330_airs_cli_is_a_name_of_the_rust_cli") else {
+        return;
+    };
+    let alias = Cli::rust(env!("CARGO_BIN_EXE_airs-cli"));
+    for (args, ts_text, rust_text) in [
+        (
+            &["--help"][..],
+            "Usage: airs-cli [options] [command]",
+            "Usage: airs [OPTIONS] [COMMAND]",
+        ),
+        (
+            &["tenant", "--help"],
+            "Usage: airs-cli tenant [options] [command]",
+            "Usage: airs tenant [OPTIONS] [COMMAND]",
+        ),
+        (
+            &["doctor", "--help"],
+            "  $ airs-cli doctor\n",
+            "  $ airs doctor\n",
+        ),
+    ] {
+        let (t, r) = both(&ts, Tenant::Prod, &no_setup, args);
+        let a = scenario(&alias, Tenant::Prod, &no_setup, args);
+        assert_eq!((t.run.code, r.run.code, a.run.code), (0, 0, 0), "{args:?}");
+        assert!(t.run.stdout.contains(ts_text), "{args:?}: {}", t.run.stdout);
+        assert!(
+            a.run.stdout.contains(rust_text),
+            "{args:?}: {}",
+            a.run.stdout
+        );
+        assert!(
+            !a.run.stdout.contains("airs-cli "),
+            "{args:?}: {}",
+            a.run.stdout
+        );
+        assert_eq!(
+            (a.run.stdout.as_str(), a.run.stderr.as_str()),
+            (r.run.stdout.as_str(), r.run.stderr.as_str()),
+            "{args:?}: airs-cli prints the same bytes as airs"
+        );
+        assert!(t.routes.is_empty() && r.routes.is_empty() && a.routes.is_empty());
+    }
+    let (t, _) = both(&ts, Tenant::Prod, &no_setup, &["--version"]);
+    let a = scenario(&alias, Tenant::Prod, &no_setup, &["--version"]);
+    assert_eq!(t.run.stdout, "7.2.1-forgejo.0\n");
+    assert_eq!(a.run.stdout, format!("{}\n", env!("CARGO_PKG_VERSION")));
+}
+
 // ---------------------------------------------------------------------------
 // Help (stdout, exit 0, zero requests on both; examples name each program)
 // ---------------------------------------------------------------------------

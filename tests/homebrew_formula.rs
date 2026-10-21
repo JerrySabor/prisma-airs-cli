@@ -138,7 +138,7 @@ fn expected(version: &str, checksum: &str) -> String {
 
 /// The fixture is the template rendered for 1.0.0 with the fixture checksum, and the
 /// template is the formula of DESIGN §21.8: it builds `airs` from the crates.io crate,
-/// links the compatibility name and tests both names. With ruby on `PATH`, the fixture
+/// links `airs-cli` and the compatibility name and tests all three names. With ruby on `PATH`, the fixture
 /// also passes `ruby -c`.
 #[test]
 fn the_template_and_the_fixture_are_the_designed_formula() {
@@ -159,9 +159,11 @@ fn the_template_and_the_fixture_are_the_designed_formula() {
         "  license \"Apache-2.0\"",
         "  depends_on \"rust\" => :build",
         "    system \"cargo\", \"install\", \"--bin\", \"airs\", *std_cargo_args",
+        "    bin.install_symlink \"airs\" => \"airs-cli\"",
         "    bin.install_symlink \"airs\" => \"airs-cli-rs\"",
         "  test do",
         "    assert_equal version.to_s, shell_output(\"#{bin}/airs --version\").strip",
+        "    assert_equal version.to_s, shell_output(\"#{bin}/airs-cli --version\").strip",
         "    assert_equal version.to_s, shell_output(\"#{bin}/airs-cli-rs --version\").strip",
         "    ENV[\"AIRS_CLI_CONFIG_DIR\"] = (testpath/\"store\").to_s",
         "    assert_equal \"[]\", shell_output(\"#{bin}/airs tenant list --output json\").strip",

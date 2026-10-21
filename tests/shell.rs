@@ -1475,6 +1475,11 @@ mod compat {
         Cli::rust(env!("CARGO_BIN_EXE_airs-cli-rs"))
     }
 
+    /// The TypeScript CLI's name (8.0, DESIGN §21.2, D330).
+    fn alias() -> Cli {
+        Cli::rust(env!("CARGO_BIN_EXE_airs-cli"))
+    }
+
     fn run_as(fx: &Fixture, cli: &Cli, args: &[&str]) -> Run {
         let before = fx.sandbox.snapshot();
         let out = run(cli, &fx.sandbox, args, &RunOptions::new());
@@ -1482,11 +1487,11 @@ mod compat {
         out
     }
 
-    /// `airs-cli-rs` and `airs` give the same exit code, stdout and stderr for help,
-    /// version, parse errors (the D91 usage line included), a usage error, an empty
-    /// store and doctor without a tenant.
+    /// `airs-cli`, `airs-cli-rs` and `airs` give the same exit code, stdout and stderr
+    /// for help, version, parse errors (the D91 usage line included), a usage error, an
+    /// empty store and doctor without a tenant (D326, D330).
     #[test]
-    fn both_names_print_the_same_bytes() {
+    fn every_name_prints_the_same_bytes() {
         let fx = no_tenant_fixture();
         let cases: &[&[&str]] = &[
             &["--version"],
@@ -1502,17 +1507,21 @@ mod compat {
         ];
         for args in cases {
             let main = run_as(&fx, &rust(), args);
-            let other = run_as(&fx, &compat(), args);
-            assert_eq!(
-                (other.code, other.stdout.as_str(), other.stderr.as_str()),
-                (main.code, main.stdout.as_str(), main.stderr.as_str()),
-                "{args:?}"
-            );
+            for name in [compat(), alias()] {
+                let other = run_as(&fx, &name, args);
+                assert_eq!(
+                    (other.code, other.stdout.as_str(), other.stderr.as_str()),
+                    (main.code, main.stdout.as_str(), main.stderr.as_str()),
+                    "{args:?}"
+                );
+            }
             for text in [&main.stdout, &main.stderr] {
                 assert!(!text.contains("airs-cli-rs"), "{args:?}: {text}");
+                assert!(!text.contains("airs-cli "), "{args:?}: {text}");
             }
         }
         assert_eq!(run_as(&fx, &compat(), &["--version"]).stdout, VERSION_LINE);
+        assert_eq!(run_as(&fx, &alias(), &["--version"]).stdout, VERSION_LINE);
         let usage = run_as(&fx, &compat(), &["tenant", "create", "dev", "extra"]);
         usage.assert_code(2);
         assert!(

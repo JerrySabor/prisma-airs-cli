@@ -10,12 +10,14 @@ class AirsCli < Formula
 
   def install
     system "cargo", "install", "--bin", "airs", *std_cargo_args
-    # The 1.x compatibility name.
+    # The TypeScript CLI's name (from 8.0) and the 1.x compatibility name.
+    bin.install_symlink "airs" => "airs-cli"
     bin.install_symlink "airs" => "airs-cli-rs"
   end
 
   test do
     assert_equal version.to_s, shell_output("#{bin}/airs --version").strip
+    assert_equal version.to_s, shell_output("#{bin}/airs-cli --version").strip
     assert_equal version.to_s, shell_output("#{bin}/airs-cli-rs --version").strip
     ENV["AIRS_CLI_CONFIG_DIR"] = (testpath/"store").to_s
     assert_equal "[]", shell_output("#{bin}/airs tenant list --output json").strip

@@ -29,6 +29,10 @@ const NAMES: [&str; 8] = [
     "Management OAuth",
     "Gateway API",
 ];
+/// The `Executable` check (DESIGN §21.15) every run starts with. The harness removes
+/// every `PATH` entry holding an `airs`, `airs-cli` or `airs-cli-rs`, so it passes unless
+/// a test sets `PATH` itself (the `executable` module).
+const EXECUTABLE_PASS: &str = "no other airs, airs-cli or airs-cli-rs earlier on PATH";
 const NOT_EVALUATED: &str = "not evaluated — fix the failed checks above first";
 /// The runner always sets `NO_PROXY=127.0.0.1,localhost`, so the suffix is always there.
 const ENV_PASS: &str = "no configuration variables set; proxy variables in effect: NO_PROXY";
@@ -153,6 +157,10 @@ impl C {
     }
 }
 
+fn exe_pass() -> C {
+    c("Executable", "pass", EXECUTABLE_PASS)
+}
+
 fn ne(name: &str) -> C {
     c(name, "skip", NOT_EVALUATED)
 }
@@ -275,9 +283,22 @@ fn after_config_failure(fx: &Fx, config: C) -> Vec<C> {
     ]
 }
 
+/// The checks after `Executable` (the eight of DESIGN §9): asserts that the first
+/// check is the `Executable` pass ([`exe_pass`]) and returns the others.
+fn checks(out: &Run) -> Vec<C> {
+    let mut all = all_checks(out);
+    assert_eq!(
+        all.first(),
+        Some(&exe_pass()),
+        "the first check is the Executable pass"
+    );
+    all.remove(0);
+    all
+}
+
 /// Parses doctor JSON, checking each element has exactly `name, status, detail[, hint]`
 /// with string values and a known status.
-fn checks(out: &Run) -> Vec<C> {
+fn all_checks(out: &Run) -> Vec<C> {
     let value = out.json();
     let items = value
         .as_array()
@@ -331,14 +352,11 @@ fn quote(text: &str) -> String {
     serde_json::to_string(text).unwrap_or_else(|err| panic!("cannot quote: {err}"))
 }
 
-/// The exact JSON bytes DESIGN §2.2/§9 require: 2-space pretty, key order
-/// `name, status, detail[, hint]`, one trailing newline.
+/// The exact JSON bytes DESIGN §2.2/§9 require for the `Executable` pass and then
+/// `all`: 2-space pretty, key order `name, status, detail[, hint]`, one trailing newline.
 fn render_json(all: &[C]) -> String {
-    if all.is_empty() {
-        return "[]\n".into();
-    }
-    let items: Vec<String> = all
-        .iter()
+    let items: Vec<String> = std::iter::once(&exe_pass())
+        .chain(all)
         .map(|check| {
             let mut fields = vec![
                 format!("    \"name\": {}", quote(&check.name)),
@@ -389,13 +407,15 @@ fn summary(all: &[C]) -> (bool, String) {
     }
 }
 
-/// The exact pretty `(stdout, stderr)` DESIGN §9 specifies for `all`.
+/// The exact pretty `(stdout, stderr)` DESIGN §9 specifies for the `Executable` pass and
+/// then `all`.
 fn render_pretty(all: &[C], quiet: bool) -> (String, String) {
     let mut out = String::new();
     if !quiet {
         out.push_str(HEADER);
     }
-    for check in all {
+    let executable = exe_pass();
+    for check in std::iter::once(&executable).chain(all) {
         out.push_str(&format!(
             "  {} {} — {}\n",
             glyph(&check.status),
@@ -575,15 +595,17 @@ mod healthy {
     use super::*;
 
     #[test]
-    fn json_lists_the_eight_checks_in_order_with_exact_details_and_bytes() {
+    fn json_lists_the_nine_checks_in_order_with_exact_details_and_bytes() {
         let (fx, tenant) = Fx::healthy();
         let out = fx.json();
-        let all = checks(&out);
+        let all = all_checks(&out);
         assert_eq!(
             all.iter()
                 .map(|check| check.name.as_str())
                 .collect::<Vec<_>>(),
-            NAMES
+            std::iter::once("Executable")
+                .chain(NAMES)
+                .collect::<Vec<_>>()
         );
         assert_json_report(&out, &healthy_checks(&fx, &tenant), 0);
     }
@@ -628,6 +650,7 @@ mod healthy {
         let config = tenant.store_path.display().to_string();
         let expected = format!(
             "\n  Doctor\n  Prisma AIRS CLI preflight checks\n\n\
+             \x20 ✓ Executable — no other airs, airs-cli or airs-cli-rs earlier on PATH\n\
              \x20 ✓ Tenant — prod (TSG 100) selected in {registry}\n\
              \x20 ✓ Config file — valid tenant config at {config} (TSG 100 matches registration)\n\
              \x20 ✓ Environment — no configuration variables set; proxy variables in effect: NO_PROXY\n\
@@ -785,7 +808,8 @@ mod pretty {
         ];
         let (stdout, stderr) = render_pretty(&expected, true);
         assert!(!stdout.contains("Doctor") && !stdout.contains("airs tenant"));
-        assert!(stdout.starts_with("  ✓ Tenant — "));
+        assert!(stdout.starts_with("  ✓ Executable — "));
+        assert!(stdout.contains("\n  ✓ Tenant — "));
         assert_eq!(out.stdout, stdout);
         assert_eq!(out.stderr, stderr);
     }
@@ -795,10 +819,9 @@ mod pretty {
         let fx = Fx::new();
         let out = fx.run(&["--quiet", "doctor"]);
         out.assert_code(1);
-        assert!(
-            out.stdout
-                .starts_with("  ✗ Tenant — no tenants registered in ")
-        );
+        assert!(out.stdout.starts_with(&format!(
+            "  ✓ Executable — {EXECUTABLE_PASS}\n  ✗ Tenant — no tenants registered in "
+        )));
         assert!(
             !out.stdout.contains("airs tenant create"),
             "hint suppressed"
@@ -2592,7 +2615,7 @@ mod exit_codes {
             .set_default(Route::Token, Planned::empty_json(401));
         let out = fx.json();
         out.assert_code(1);
-        assert_eq!(checks(&out).len(), 8);
+        assert_eq!(all_checks(&out).len(), 9);
         assert_eq!(out.stderr, "");
     }
 
@@ -3011,5 +3034,179 @@ mod gateway_api {
         );
         assert!(out.stdout.contains(&format!("\n      {GRANT_HINT}\n")));
         assert!(out.stdout.contains("All checks passed (1 warning)"));
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// The Executable check (8.0, DESIGN §21.15, D331)
+// ---------------------------------------------------------------------------------------
+
+mod executable {
+    use super::*;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    const HINT: &str = "Remove the other installation or put this one first on PATH; install airs through one channel only (Homebrew, npm, cargo or a release tarball)";
+
+    /// An executable file at `dir/name` (a shell script that would print `other`).
+    fn program(dir: &Path, name: &str) -> std::path::PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, "#!/bin/sh\necho other\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    fn canonical(path: &Path) -> String {
+        std::fs::canonicalize(path).unwrap().display().to_string()
+    }
+
+    /// The directory of the binary under test, which holds `airs`, `airs-cli` and
+    /// `airs-cli-rs` (one copy per `[[bin]]`).
+    fn own_dir() -> String {
+        Path::new(env!("CARGO_BIN_EXE_airs"))
+            .parent()
+            .unwrap()
+            .display()
+            .to_string()
+    }
+
+    fn run_doctor(fx: &Fx, path: &str, extra: &[(&str, String)]) -> Run {
+        let mut options = RunOptions::new().env("PATH", path);
+        for (name, value) in extra {
+            options = options.env(name, value.as_str());
+        }
+        fx.run_with(&["doctor", "--output", "json"], options)
+    }
+
+    /// Another `airs` earlier on `PATH` is a warning naming its path; it never fails the
+    /// run, and the other checks are unchanged.
+    #[test]
+    fn another_airs_first_on_path_warns() {
+        let (fx, tenant) = Fx::healthy();
+        let bin = fx.sandbox.bin_dir();
+        let other = program(&bin, "airs");
+        let out = run_doctor(
+            &fx,
+            &format!("{}:{}:/usr/bin:/bin", bin.display(), own_dir()),
+            &[],
+        );
+        out.assert_success();
+        let all = all_checks(&out);
+        assert_eq!(
+            all[0],
+            c(
+                "Executable",
+                "warn",
+                format!("airs on PATH is another program: {}", canonical(&other))
+            )
+            .hint(HINT)
+        );
+        assert_eq!(all[1..], healthy_checks(&fx, &tenant)[..]);
+    }
+
+    /// The binary's own directory (all three names) and a link to the binary under
+    /// another name pass; a link to another file names both paths.
+    #[test]
+    fn its_own_names_and_links_to_it_pass() {
+        let (fx, _) = Fx::healthy();
+        let out = run_doctor(&fx, &format!("{}:/usr/bin:/bin", own_dir()), &[]);
+        out.assert_success();
+        assert_eq!(all_checks(&out)[0], exe_pass());
+
+        let links = fx.sandbox.bin_dir();
+        std::fs::create_dir_all(&links).unwrap();
+        symlink(env!("CARGO_BIN_EXE_airs"), links.join("airs-cli")).unwrap();
+        let out = run_doctor(&fx, &format!("{}:/usr/bin:/bin", links.display()), &[]);
+        assert_eq!(all_checks(&out)[0], exe_pass());
+
+        let other = program(&fx.sandbox.tmp().join("elsewhere"), "tool");
+        symlink(&other, links.join("airs-cli-rs")).unwrap();
+        let out = run_doctor(&fx, &format!("{}:/usr/bin:/bin", links.display()), &[]);
+        out.assert_success();
+        assert_eq!(
+            all_checks(&out)[0],
+            c(
+                "Executable",
+                "warn",
+                format!(
+                    "airs-cli-rs on PATH is another program: {} ({})",
+                    links.join("airs-cli-rs").display(),
+                    canonical(&other)
+                )
+            )
+            .hint(HINT)
+        );
+    }
+
+    /// Started by the npm launcher, the npm links to that launcher are this program
+    /// (`AIRS_NPM_LAUNCHER`, §21.16); without the variable they are another program.
+    #[test]
+    fn the_npm_launcher_that_started_it_is_this_program() {
+        let (fx, _) = Fx::healthy();
+        let launcher = program(&fx.sandbox.tmp().join("npm/lib/bin"), "airs.js");
+        let bin = fx.sandbox.bin_dir();
+        std::fs::create_dir_all(&bin).unwrap();
+        symlink(&launcher, bin.join("airs")).unwrap();
+        symlink(&launcher, bin.join("airs-cli")).unwrap();
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        let out = run_doctor(
+            &fx,
+            &path,
+            &[("AIRS_NPM_LAUNCHER", launcher.display().to_string())],
+        );
+        assert_eq!(all_checks(&out)[0], exe_pass());
+        let out = run_doctor(&fx, &path, &[]);
+        let check = &all_checks(&out)[0];
+        assert_eq!(check.status, "warn");
+        assert_eq!(
+            check.detail,
+            format!(
+                "airs on PATH is another program: {} ({launcher}); airs-cli on PATH is another program: {} ({launcher})",
+                bin.join("airs").display(),
+                bin.join("airs-cli").display(),
+                launcher = canonical(&launcher)
+            )
+        );
+        // A relative launcher path is ignored.
+        let out = run_doctor(&fx, &path, &[("AIRS_NPM_LAUNCHER", "airs.js".to_owned())]);
+        assert_eq!(all_checks(&out)[0].status, "warn");
+    }
+
+    /// The check is evaluated before the tenant is read, so a store failure does not
+    /// hide it; pretty output shows it first with the warning glyph and counts it.
+    #[test]
+    fn it_runs_before_the_tenant_and_shows_first() {
+        let fx = Fx::new();
+        fx.sandbox.write_store_raw(b"version = ", 0o600);
+        let bin = fx.sandbox.bin_dir();
+        program(&bin, "airs-cli");
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        let out = run_doctor(&fx, &path, &[]);
+        out.assert_code(1);
+        let all = all_checks(&out);
+        assert_eq!(all[0].status, "warn");
+        assert_eq!(all[1].name, "Tenant");
+        assert_eq!(all[1].status, "fail");
+        assert!(all[2..].iter().all(|check| check.detail == NOT_EVALUATED));
+
+        let (fx, _) = Fx::healthy();
+        let bin = fx.sandbox.bin_dir();
+        program(&bin, "airs-cli");
+        let out = fx.run_with(
+            &["doctor"],
+            RunOptions::new().env("PATH", format!("{}:/usr/bin:/bin", bin.display())),
+        );
+        out.assert_success();
+        let first = format!(
+            "{HEADER}  ⚠ Executable — airs-cli on PATH is another program: {}\n      {HINT}\n  ✓ Tenant — ",
+            canonical(&bin.join("airs-cli"))
+        );
+        assert!(out.stdout.starts_with(&first), "{}", out.stdout);
+        assert!(
+            out.stdout
+                .ends_with("\n\n  ✓ All checks passed (1 warning)\n\n"),
+            "{}",
+            out.stdout
+        );
     }
 }

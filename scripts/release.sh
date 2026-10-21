@@ -8,9 +8,10 @@
 # that can fail on a missing token scope happens before the tag is public.
 #
 # The executable is airs; each tarball, airs-cli-<version>-<target>.tar.gz, also holds
-# the 1.x compatibility name airs-cli-rs as a relative symlink to it (DESIGN §21.7,
-# scripts/package-release.sh). The crates.io publish and the Homebrew formula follow
-# by hand (docs/RELEASING.md §2 and §6); this script does neither.
+# the names airs-cli (from 8.0) and airs-cli-rs (the 1.x compatibility name) as relative
+# symlinks to it (DESIGN §21.7, scripts/package-release.sh). The crates.io publish, the
+# Homebrew formula and the npm packages follow by hand (docs/RELEASING.md §2, §6 and
+# §7); this script does none of them.
 #
 # -E: the ERR trap also fires inside functions (run, act, check helpers) and
 # subshells, so every failure names the step it stopped in.
@@ -26,6 +27,7 @@ KEYCHAIN_ITEM="airs-cli-forgejo"
 SIGN_IDENTITY="${AIRS_SIGN_IDENTITY:-Developer ID Application: Calvin Remsburg (G5QLZ5A8TA)}"
 NOTARY_PROFILE="${AIRS_NOTARY_PROFILE:-airs-cli-notary}"
 BIN="airs"
+ALIAS_BIN="airs-cli"
 COMPAT_BIN="airs-cli-rs"
 MAC_TARGET="aarch64-apple-darwin"
 LINUX_TARGETS=(x86_64-unknown-linux-musl aarch64-unknown-linux-musl)
@@ -239,7 +241,7 @@ for target in "$MAC_TARGET" "${LINUX_TARGETS[@]}"; do
   grep -qx "$target" <<<"$installed_targets" || die "rust target $target is missing (rustup target add $target)"
 done
 tar --version 2>/dev/null | head -1 | grep -q '^bsdtar ' \
-  || die "tar is not bsdtar (the packaging needs --no-mac-metadata and stores the $COMPAT_BIN link)"
+  || die "tar is not bsdtar (the packaging needs --no-mac-metadata and stores the $ALIAS_BIN and $COMPAT_BIN links)"
 echo "    $(cargo --version)"
 echo "    zig $(zig version), $(cargo-zigbuild --version)"
 
@@ -269,8 +271,8 @@ run env -u AIRS_RS_LIVE -u AIRS_E2E_TENANT -u AIRS_E2E_PROFILE -u AIRS_ALLOW_PAR
   AIRS_REQUIRE_PARITY=1 cargo test --workspace --locked --no-fail-fast
 
 step "Build $MAC_TARGET"
-# --bin: only airs is built for a release; the compatibility name is a link in the
-# tarball, so its second binary can never be packaged (DESIGN §21.7).
+# --bin: only airs is built for a release; the other names are links in the tarball,
+# so their binaries can never be packaged (DESIGN §21.7).
 run cargo build --release --locked --target "$MAC_TARGET" --bin "$BIN"
 step "Build ${LINUX_TARGETS[*]} (cargo-zigbuild)"
 for target in "${LINUX_TARGETS[@]}"; do
@@ -353,9 +355,10 @@ fi
 step "Package into $DIST"
 run rm -rf "$DIST"
 run mkdir -p "$DIST"
-# scripts/package-release.sh stages airs, the airs-cli-rs link, README.md and LICENSE per
-# target, writes the tarballs and SHA256SUMS, then lists and extracts each tarball to
-# check its entries, link, modes and owner, and runs both names' --version on macOS.
+# scripts/package-release.sh stages airs, the airs-cli and airs-cli-rs links, README.md,
+# LICENSE and NOTICE per target, writes the tarballs and SHA256SUMS, then lists and
+# extracts each tarball to check its entries, links, modes and owner, and runs the three
+# names' --version on macOS.
 package_args=(--run-check "$MAC_TARGET")
 if [ "$dry_run" -eq 0 ]; then
   # The signature must survive packaging: codesign --verify on the extracted airs.
@@ -487,6 +490,6 @@ else
   if [ "$prerelease" = true ]; then
     echo "next: cargo publish -p airs-cli (a pre-release gets no Homebrew formula; docs/RELEASING.md §2)"
   else
-    echo "next: cargo publish -p airs-cli, then scripts/homebrew-formula.sh $version (docs/RELEASING.md §6)"
+    echo "next: cargo publish -p airs-cli, then scripts/homebrew-formula.sh $version (docs/RELEASING.md §6) and scripts/npm-package.sh $version (§7)"
   fi
 fi

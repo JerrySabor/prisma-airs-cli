@@ -23,6 +23,15 @@ const KEPT_FORMATS: [&str; 4] = [
     ".runtime-profiles",
 ];
 
+/// The lists of the three names that the doctor's `Executable` check looks for on `PATH`
+/// (DESIGN §21.15): there `airs-cli-rs` names a file to find, not this program.
+/// Each entry is the list up to the end of the name (without a closing quote).
+const PATH_NAME_LISTS: [&str; 3] = [
+    "\"airs\", \"airs-cli\", \"airs-cli-rs",
+    "airs, airs-cli or airs-cli-rs",
+    "`airs`, `airs-cli` or `airs-cli-rs",
+];
+
 /// The flags after which a name is an invocation besides the normaliser's words
 /// ([`PROGRAM_NEXT`], DESIGN §21.6): the version and help flags, which documents put
 /// after the program (`airs --version`, `airs -h`).
@@ -64,7 +73,8 @@ fn occurrences(text: &str) -> impl Iterator<Item = usize> + '_ {
 }
 
 /// Every `airs-cli-rs` in `src/**/*.rs` is one of the four kept format names (DESIGN
-/// §21.6 "Source scan").
+/// §21.6 "Source scan") or ends a list of the three names the doctor looks for on `PATH`
+/// (§21.15).
 #[test]
 fn the_source_names_only_the_kept_format_names() {
     let mut files = Vec::new();
@@ -76,9 +86,12 @@ fn the_source_names_only_the_kept_format_names() {
         let text = fs::read_to_string(file).unwrap();
         for at in occurrences(&text) {
             let after = &text[at + OLD.len()..];
+            let listed = PATH_NAME_LISTS
+                .iter()
+                .any(|list| text[..at + OLD.len()].ends_with(list));
             if KEPT_FORMATS.iter().any(|format| after.starts_with(format)) {
                 kept += 1;
-            } else {
+            } else if !listed {
                 let line = text[..at].matches('\n').count() + 1;
                 problems.push(format!("{}:{line}", file.display()));
             }
@@ -175,14 +188,20 @@ fn current_docs_invoke_airs() {
     );
 }
 
-/// The compatibility binary is the main binary (DESIGN §21.2): its source includes
-/// `src/main.rs` and nothing else, and `Cargo.toml` declares exactly the two targets
-/// with `default-run = "airs"`.
+/// The other names are the main binary (DESIGN §21.2): each shim includes `src/main.rs`
+/// and nothing else, and `Cargo.toml` declares exactly the three targets with
+/// `default-run = "airs"`: `airs`, the TypeScript CLI's name `airs-cli` (8.0) and the
+/// 1.x compatibility name `airs-cli-rs`.
 #[test]
 fn the_compatibility_binary_is_the_main_binary() {
     assert_eq!(
         read("src/bin/airs-cli-rs.rs"),
         "//! The 1.x compatibility name (DESIGN §21.2): the same program as `airs`.\n\
+         include!(\"../main.rs\");\n"
+    );
+    assert_eq!(
+        read("src/bin/airs-cli.rs"),
+        "//! The TypeScript CLI's name (DESIGN §21.2): the same program as `airs`.\n\
          include!(\"../main.rs\");\n"
     );
     let manifest = read("Cargo.toml");
@@ -204,12 +223,9 @@ fn the_compatibility_binary_is_the_main_binary() {
         bins,
         [
             "name = \"airs\"\npath = \"src/main.rs\"",
+            "name = \"airs-cli\"\npath = \"src/bin/airs-cli.rs\"",
             "name = \"airs-cli-rs\"\npath = \"src/bin/airs-cli-rs.rs\"",
         ]
-    );
-    assert!(
-        !manifest.contains("name = \"airs-cli\"\npath"),
-        "no airs-cli binary"
     );
 }
 
@@ -252,8 +268,8 @@ fn subcommands(help: &str) -> Vec<String> {
 
 /// Every command's help, from the root down (DESIGN §21.4 families 1, 3 and 4): the
 /// usage line is `Usage: airs <path> …`, every example starts `  $ airs ` (or `  $ printf `
-/// piping into `airs`), and nothing names `airs-cli-rs`. The compatibility binary
-/// prints the same root and leaf help.
+/// piping into `airs`), and nothing names `airs-cli-rs`. The `airs-cli` and
+/// `airs-cli-rs` binaries print the same root and leaf help.
 #[test]
 fn every_help_text_names_airs() {
     let sandbox = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
@@ -302,13 +318,17 @@ fn every_help_text_names_airs() {
             pending.push(next);
         }
     }
-    let compat = env!("CARGO_BIN_EXE_airs-cli-rs");
-    for args in [&["--help"][..], &["gateway", "report", "--help"]] {
-        assert_eq!(
-            help_of(compat, &sandbox, args),
-            help_of(bin, &sandbox, args),
-            "{args:?}"
-        );
+    for other in [
+        env!("CARGO_BIN_EXE_airs-cli"),
+        env!("CARGO_BIN_EXE_airs-cli-rs"),
+    ] {
+        for args in [&["--help"][..], &["gateway", "report", "--help"]] {
+            assert_eq!(
+                help_of(other, &sandbox, args),
+                help_of(bin, &sandbox, args),
+                "{other} {args:?}"
+            );
+        }
     }
     let _ = fs::remove_dir_all(&sandbox);
     assert!(

@@ -219,10 +219,12 @@ jobs:
           got=$("$bin" --version)
           echo "--version: $got"
           [ "$got" = "$expected" ] || { echo "expected --version $expected" >&2; exit 1; }
-          # The 1.x compatibility name (DESIGN §21.2) is the same program.
-          compat=$("target/$target/release/airs-cli-rs" --version)
-          echo "airs-cli-rs --version: $compat"
-          [ "$compat" = "$expected" ] || { echo "expected airs-cli-rs --version $expected" >&2; exit 1; }
+          # The other names (DESIGN §21.2) are the same program.
+          for name in airs-cli airs-cli-rs; do
+            got=$("target/$target/release/$name" --version)
+            echo "$name --version: $got"
+            [ "$got" = "$expected" ] || { echo "expected $name --version $expected" >&2; exit 1; }
+          done
           smoke="$RUNNER_TEMP/smoke"
           mkdir -p "$smoke/home" "$smoke/store"
           chmod 0700 "$smoke/store"

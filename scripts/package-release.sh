@@ -4,8 +4,9 @@
 # usage text (--help prints it, and every exit-2 refusal prints it on stderr).
 #
 # Each tarball, <dist>/airs-cli-<version>-<target>.tar.gz, holds exactly airs (0755),
-# airs-cli-rs (a relative symlink to airs, the 1.x compatibility name), README.md and
-# LICENSE (0644), owned by root:root, with no AppleDouble files or extended attributes.
+# airs-cli (a relative symlink to airs, the TypeScript CLI's name, from 8.0), airs-cli-rs
+# (a relative symlink to airs, the 1.x compatibility name), README.md, LICENSE and NOTICE
+# (0644), owned by root:root, with no AppleDouble files or extended attributes.
 # SHA256SUMS lists the tarballs. Every tarball is listed and extracted again to check
 # its layout. A refusal writes nothing; a failure removes what this run wrote.
 set -Eeuo pipefail
@@ -13,9 +14,12 @@ umask 022
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="airs"
+ALIAS_BIN="airs-cli"
 COMPAT_BIN="airs-cli-rs"
 PKG="airs-cli"
-ENTRIES=("$BIN" "$COMPAT_BIN" README.md LICENSE)
+LINKS=("$ALIAS_BIN" "$COMPAT_BIN")
+TEXTS=(README.md LICENSE NOTICE)
+ENTRIES=("$BIN" "${LINKS[@]}" "${TEXTS[@]}")
 
 usage() {
   cat <<'USAGE'
@@ -25,8 +29,8 @@ usage() {
   <version>                    the release version (e.g. 1.0.0, no leading v)
   <dist>                       the output directory; it must be absent or empty
   <target>=<binary>            a rust target and the airs binary built for it
-  --run-check <target>         run the packaged airs and airs-cli-rs --version for
-                               this target (it must run on this machine)
+  --run-check <target>         run the packaged airs, airs-cli and airs-cli-rs
+                               --version for this target (it must run on this machine)
   --verify-signature <target>  run codesign --verify --strict on this target's
                                packaged airs (macOS)
 USAGE
@@ -131,7 +135,7 @@ if [ -e "$dist" ] || [ -L "$dist" ]; then
   [ -d "$dist" ] && [ ! -L "$dist" ] || die "$dist exists and is not a directory"
   [ -z "$(ls -A "$dist")" ] || die "$dist exists and is not empty"
 fi
-for file in README.md LICENSE; do
+for file in "${TEXTS[@]}"; do
   [ -f "$ROOT/$file" ] || die "$ROOT/$file is missing"
 done
 i=0
@@ -185,9 +189,13 @@ while [ "$i" -lt "${#targets[@]}" ]; do
   mkdir -p "$stage"
   cp "$binary" "$stage/$BIN"
   chmod 0755 "$stage/$BIN"
-  (cd "$stage" && ln -s "$BIN" "$COMPAT_BIN")
-  cp "$ROOT/README.md" "$ROOT/LICENSE" "$stage/"
-  chmod 0644 "$stage/README.md" "$stage/LICENSE"
+  for link in "${LINKS[@]}"; do
+    (cd "$stage" && ln -s "$BIN" "$link")
+  done
+  for file in "${TEXTS[@]}"; do
+    cp "$ROOT/$file" "$stage/"
+    chmod 0644 "$stage/$file"
+  done
   # No AppleDouble files or extended attributes; root-owned entries; the link is
   # stored as a link (bsdtar does not follow it without -L).
   written+=("$name.tar.gz")
@@ -216,37 +224,43 @@ while [ "$i" -lt "${#targets[@]}" ]; do
   owners="$(awk '{ print $3 ":" $4 }' <<<"$listing" | sort -u)"
   [ "$owners" = "root:root" ] || die "${tarballs[$i]} has entries not owned by root:root"
   modes="$(awk '{ print $1 }' <<<"$listing" | tr '\n' ' ')"
-  [[ "$modes" =~ ^-rwxr-xr-x\ l[rwx-]{9}\ -rw-r--r--\ -rw-r--r--\ $ ]] \
+  [[ "$modes" =~ ^-rwxr-xr-x\ l[rwx-]{9}\ l[rwx-]{9}\ -rw-r--r--\ -rw-r--r--\ -rw-r--r--\ $ ]] \
     || die "${tarballs[$i]} has the modes $modes"
-  link_line="$(sed -n 2p <<<"$listing")"
-  [[ "$link_line" == *" $COMPAT_BIN -> $BIN" ]] || die "${tarballs[$i]}: $COMPAT_BIN is not a link to $BIN"
+  line=2
+  for link in "${LINKS[@]}"; do
+    link_line="$(sed -n "${line}p" <<<"$listing")"
+    [[ "$link_line" == *" $link -> $BIN" ]] || die "${tarballs[$i]}: $link is not a link to $BIN"
+    line=$((line + 1))
+  done
 
   verify="$dist/.verify/$target"
   mkdir -p "$verify"
   tar -xzf "$tarball" -C "$verify"
   [ -f "$verify/$BIN" ] && [ ! -L "$verify/$BIN" ] || die "${tarballs[$i]}: $BIN is not a regular file"
   [ "$(mode_of "$verify/$BIN")" = 755 ] || die "${tarballs[$i]}: $BIN is not 0755"
-  [ -L "$verify/$COMPAT_BIN" ] || die "${tarballs[$i]}: $COMPAT_BIN is not a symlink"
-  [ "$(readlink "$verify/$COMPAT_BIN")" = "$BIN" ] || die "${tarballs[$i]}: $COMPAT_BIN does not point to $BIN"
-  for file in README.md LICENSE; do
+  for link in "${LINKS[@]}"; do
+    [ -L "$verify/$link" ] || die "${tarballs[$i]}: $link is not a symlink"
+    [ "$(readlink "$verify/$link")" = "$BIN" ] || die "${tarballs[$i]}: $link does not point to $BIN"
+  done
+  for file in "${TEXTS[@]}"; do
     [ -f "$verify/$file" ] && [ ! -L "$verify/$file" ] || die "${tarballs[$i]}: $file is not a regular file"
     [ "$(mode_of "$verify/$file")" = 644 ] || die "${tarballs[$i]}: $file is not 0644"
     cmp -s "$verify/$file" "$ROOT/$file" || die "${tarballs[$i]}: $file differs from the repository's"
   done
   cmp -s "$verify/$BIN" "${binaries[$i]}" || die "${tarballs[$i]}: $BIN differs from ${binaries[$i]}"
   if [ "$target" = "$run_check" ]; then
-    for name in "$BIN" "$COMPAT_BIN"; do
+    for name in "$BIN" "${LINKS[@]}"; do
       got="$(cd "$verify" && "./$name" --version)" || die "${tarballs[$i]}: ./$name --version failed"
       [ "$got" = "$version" ] || die "${tarballs[$i]}: ./$name --version prints '$got', expected '$version'"
     done
-    echo "    ok: ${tarballs[$i]}: ./$BIN --version and ./$COMPAT_BIN --version print $version"
+    echo "    ok: ${tarballs[$i]}: ./$BIN, ./$ALIAS_BIN and ./$COMPAT_BIN --version print $version"
   fi
   if [ "$target" = "$verify_signature" ]; then
     codesign --verify --strict "$verify/$BIN" \
       || die "${tarballs[$i]}: the packaged $BIN fails codesign --verify --strict"
     echo "    ok: ${tarballs[$i]}: the packaged $BIN passes codesign --verify --strict"
   fi
-  echo "    ok: ${tarballs[$i]}: ${ENTRIES[*]}; $COMPAT_BIN -> $BIN; modes 0755/0644; root:root"
+  echo "    ok: ${tarballs[$i]}: ${ENTRIES[*]}; $ALIAS_BIN -> $BIN, $COMPAT_BIN -> $BIN; modes 0755/0644; root:root"
   i=$((i + 1))
 done
 rm -rf "$dist/.verify"

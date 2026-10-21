@@ -10,10 +10,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-const SCRIPTS: [&str; 3] = [
+const SCRIPTS: [&str; 4] = [
     "scripts/release.sh",
     "scripts/package-release.sh",
     "scripts/homebrew-formula.sh",
+    "scripts/npm-package.sh",
 ];
 
 fn root() -> PathBuf {
@@ -148,6 +149,11 @@ fn every_script_prints_its_whole_usage() {
             "homebrew-formula: --checksum needs a value\n",
         ),
         ("scripts/build-reference-cli.sh", &["--bogus"][..], ""),
+        (
+            "scripts/npm-package.sh",
+            &["--dist"][..],
+            "npm-package: --dist needs a directory\n",
+        ),
     ] {
         let source = read(script);
         assert!(
@@ -382,9 +388,10 @@ mod packaging {
     }
 
     /// Three tarballs `airs-cli-<version>-<target>.tar.gz`, each listing exactly `airs`,
-    /// `airs-cli-rs`, `README.md`, `LICENSE` in that order, root-owned, with `airs` a
-    /// 0755 copy of the binary, `airs-cli-rs` a symlink to exactly `airs` and the text
-    /// files 0644 copies of the repository's; `SHA256SUMS` lists exactly the tarballs.
+    /// `airs-cli`, `airs-cli-rs`, `README.md`, `LICENSE`, `NOTICE` in that order,
+    /// root-owned, with `airs` a 0755 copy of the binary, `airs-cli` and `airs-cli-rs`
+    /// symlinks to exactly `airs` and the text files 0644 copies of the repository's;
+    /// `SHA256SUMS` lists exactly the tarballs.
     #[test]
     fn the_tarballs_hold_airs_and_the_compatibility_link() {
         let dir = sandbox("layout");
@@ -402,7 +409,7 @@ mod packaging {
         assert_eq!(stderr, "");
         assert!(
             stdout.contains(
-                "    ok: airs-cli-1.0.0-aarch64-apple-darwin.tar.gz: ./airs --version and ./airs-cli-rs --version print 1.0.0\n"
+                "    ok: airs-cli-1.0.0-aarch64-apple-darwin.tar.gz: ./airs, ./airs-cli and ./airs-cli-rs --version print 1.0.0\n"
             ),
             "{stdout}"
         );
@@ -447,7 +454,7 @@ mod packaging {
             let file = file.to_str().unwrap();
             assert_eq!(
                 tar(&["-tzf", file]),
-                "airs\nairs-cli-rs\nREADME.md\nLICENSE\n",
+                "airs\nairs-cli\nairs-cli-rs\nREADME.md\nLICENSE\nNOTICE\n",
                 "{tarball}"
             );
             let listing = tar(&["-tvzf", file]);
@@ -455,20 +462,22 @@ mod packaging {
                 .lines()
                 .map(|line| line.split_whitespace().collect())
                 .collect();
-            assert_eq!(rows.len(), 4, "{listing}");
+            assert_eq!(rows.len(), 6, "{listing}");
             for row in &rows {
                 assert_eq!((row[2], row[3]), ("root", "root"), "{listing}");
             }
             assert_eq!(rows[0][0], "-rwxr-xr-x", "{listing}");
-            assert!(rows[1][0].starts_with('l'), "{listing}");
+            for (row, link) in [(1, "airs-cli"), (2, "airs-cli-rs")] {
+                assert!(rows[row][0].starts_with('l'), "{listing}");
+                assert_eq!(
+                    rows[row][rows[row].len() - 3..],
+                    [link, "->", "airs"],
+                    "{listing}"
+                );
+            }
             assert_eq!(
-                rows[1][rows[1].len() - 3..],
-                ["airs-cli-rs", "->", "airs"],
-                "{listing}"
-            );
-            assert_eq!(
-                (rows[2][0], rows[3][0]),
-                ("-rw-r--r--", "-rw-r--r--"),
+                (rows[3][0], rows[4][0], rows[5][0]),
+                ("-rw-r--r--", "-rw-r--r--", "-rw-r--r--"),
                 "{listing}"
             );
             assert!(!listing.contains("._"), "no AppleDouble entries: {listing}");
@@ -488,17 +497,19 @@ mod packaging {
                 fs::read(binary).unwrap(),
                 "{tarball}"
             );
-            let link = fs::symlink_metadata(out.join("airs-cli-rs")).unwrap();
-            assert!(
-                link.file_type().is_symlink(),
-                "{tarball}: airs-cli-rs is a symlink"
-            );
-            assert_eq!(
-                fs::read_link(out.join("airs-cli-rs")).unwrap(),
-                Path::new("airs"),
-                "{tarball}"
-            );
-            for text in ["README.md", "LICENSE"] {
+            for name in ["airs-cli", "airs-cli-rs"] {
+                let link = fs::symlink_metadata(out.join(name)).unwrap();
+                assert!(
+                    link.file_type().is_symlink(),
+                    "{tarball}: {name} is a symlink"
+                );
+                assert_eq!(
+                    fs::read_link(out.join(name)).unwrap(),
+                    Path::new("airs"),
+                    "{tarball}: {name}"
+                );
+            }
+            for text in ["README.md", "LICENSE", "NOTICE"] {
                 let meta = fs::symlink_metadata(out.join(text)).unwrap();
                 assert!(meta.file_type().is_file());
                 assert_eq!(meta.mode() & 0o777, 0o644, "{tarball}: {text}");
@@ -507,7 +518,17 @@ mod packaging {
                     fs::read(root().join(text)).unwrap()
                 );
             }
-            assert_eq!(names(&out), ["LICENSE", "README.md", "airs", "airs-cli-rs"]);
+            assert_eq!(
+                names(&out),
+                [
+                    "LICENSE",
+                    "NOTICE",
+                    "README.md",
+                    "airs",
+                    "airs-cli",
+                    "airs-cli-rs"
+                ]
+            );
         }
         let _ = fs::remove_dir_all(&dir);
     }

@@ -31,12 +31,17 @@ readme = "README.md"
 keywords = ["prisma-airs", "ai-security", "cli", "paloaltonetworks"]
 categories = ["command-line-utilities"]
 # Only what builds the executable; tests, fixtures, docs and CI stay in the repository.
-include = ["/src/**/*.rs", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]
+include = ["/src/**/*.rs", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE", "/NOTICE"]
 default-run = "airs"
 
 [[bin]]
 name = "airs"
 path = "src/main.rs"
+
+# The TypeScript CLI's name (DESIGN §21.2, 8.0): the same program, so 7.x scripts keep working.
+[[bin]]
+name = "airs-cli"
+path = "src/bin/airs-cli.rs"
 
 # The 1.x compatibility name (DESIGN §21.2): the same program under its 0.x name.
 [[bin]]

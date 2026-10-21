@@ -1,4 +1,5 @@
-//! `doctor`: eight scoped preflight checks (DESIGN §9; `Gateway API` from 0.10, §19.16).
+//! `doctor`: nine scoped preflight checks (DESIGN §9; `Gateway API` from 0.10, §19.16;
+//! `Executable` from 8.0, §21.15).
 //!
 //! Probes run sequentially, each bounded by one 5 s `RequestOptions` budget that
 //! really cancels the request. Details carry key names, paths and the registered
@@ -18,7 +19,8 @@ use crate::tenant::{ConfigLoadError, Selected, StoreView};
 use scm::airs::management::TopicListAllOptions;
 use scm::{ErrorKind, RequestOptions};
 use serde::Serialize;
-use std::path::Path;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -39,6 +41,7 @@ pub struct Check {
     pub hint: Option<String>,
 }
 
+pub const EXECUTABLE: &str = "Executable";
 pub const TENANT: &str = "Tenant";
 pub const CONFIG_FILE: &str = "Config file";
 pub const ENVIRONMENT: &str = "Environment";
@@ -108,6 +111,106 @@ pub fn summary(checks: &[Check]) -> (bool, String) {
         (false, "All checks passed".to_owned())
     } else {
         (false, format!("All checks passed ({})", parts.join(", ")))
+    }
+}
+
+/// The names this program answers to on `PATH` (DESIGN §21.2): `airs`, the TypeScript
+/// CLI's name and the 0.x/1.x compatibility name, i.e. `airs`, `airs-cli` or `airs-cli-rs`.
+pub const PROGRAM_NAMES: [&str; 3] = ["airs", "airs-cli", "airs-cli-rs"];
+
+/// The environment variable the npm launcher sets to its own real path (§21.16), so the
+/// npm links to it count as this program.
+pub const NPM_LAUNCHER_VAR: &str = "AIRS_NPM_LAUNCHER";
+
+const EXECUTABLE_PASS: &str = "no other airs, airs-cli or airs-cli-rs earlier on PATH";
+const EXECUTABLE_HINT: &str = "Remove the other installation or put this one first on PATH; install airs through one channel only (Homebrew, npm, cargo or a release tarball)";
+
+/// What the Executable check knows about this process (§21.15).
+pub struct RunningProgram {
+    /// The running executable, canonical; `None` when it cannot be determined.
+    pub exe: Option<PathBuf>,
+    /// The npm launcher that started it (`AIRS_NPM_LAUNCHER`, canonical), if any.
+    pub launcher: Option<PathBuf>,
+}
+
+impl RunningProgram {
+    /// This process: `current_exe` and `AIRS_NPM_LAUNCHER` (when absolute), canonical.
+    pub fn current() -> Self {
+        let canonical = |path: PathBuf| std::fs::canonicalize(path).ok();
+        Self {
+            exe: std::env::current_exe().ok().and_then(canonical),
+            launcher: std::env::var_os(NPM_LAUNCHER_VAR)
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+                .and_then(canonical),
+        }
+    }
+
+    /// Whether `file` (canonical) is this program: the executable itself, another of its
+    /// names in the executable's own directory (`cargo install` and `cargo build` write
+    /// one copy per name there), or the npm launcher that started it.
+    fn is(&self, file: &Path) -> bool {
+        let Some(exe) = &self.exe else { return false };
+        if file == exe || self.launcher.as_deref() == Some(file) {
+            return true;
+        }
+        file.parent() == exe.parent()
+            && file
+                .file_name()
+                .and_then(OsStr::to_str)
+                .is_some_and(|name| PROGRAM_NAMES.contains(&name))
+    }
+}
+
+/// The file a shell runs for `name`: the first absolute `PATH` entry holding an
+/// executable regular file (after symlinks) of that name, and its canonical path.
+fn first_on_path(path: &OsStr, name: &str) -> Option<(PathBuf, PathBuf)> {
+    use std::os::unix::fs::PermissionsExt;
+    std::env::split_paths(path)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(name))
+        .find(|candidate| {
+            std::fs::metadata(candidate)
+                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        })
+        .and_then(|found| {
+            let canonical = std::fs::canonicalize(&found).ok()?;
+            Some((found, canonical))
+        })
+}
+
+/// The Executable check (§21.15): warns when another `airs`, `airs-cli` or `airs-cli-rs`
+/// earlier on `PATH` resolves to a different file than this program; never fails.
+pub fn check_executable(path: Option<&OsStr>, program: &RunningProgram) -> Check {
+    if program.exe.is_none() {
+        return Check::new(
+            EXECUTABLE,
+            Status::Skip,
+            "the running executable cannot be determined",
+        );
+    }
+    let others: Vec<String> = PROGRAM_NAMES
+        .iter()
+        .filter_map(|name| {
+            let (found, canonical) = first_on_path(path?, name)?;
+            if program.is(&canonical) {
+                return None;
+            }
+            Some(if found == canonical {
+                format!("{name} on PATH is another program: {}", found.display())
+            } else {
+                format!(
+                    "{name} on PATH is another program: {} ({})",
+                    found.display(),
+                    canonical.display()
+                )
+            })
+        })
+        .collect();
+    if others.is_empty() {
+        Check::new(EXECUTABLE, Status::Pass, EXECUTABLE_PASS)
+    } else {
+        Check::new(EXECUTABLE, Status::Warn, others.join("; ")).hint(EXECUTABLE_HINT)
     }
 }
 
@@ -636,8 +739,13 @@ async fn probe_gateway(
     }
 }
 
-/// Run every check in order.
+/// Run every check in order: `Executable` first, then the eight of §9.
 pub async fn checks(invocation: &mut Invocation) -> Result<Vec<Check>, CliError> {
+    // Always evaluated: it reads only PATH and the running executable (§21.15).
+    let executable = check_executable(
+        std::env::var_os("PATH").as_deref(),
+        &RunningProgram::current(),
+    );
     let store = invocation.env.store();
     let view = store
         .as_ref()
@@ -662,7 +770,7 @@ pub async fn checks(invocation: &mut Invocation) -> Result<Vec<Check>, CliError>
     );
     let store_failed = !matches!(view, Some(Ok(_)));
     if store_failed {
-        let mut all = vec![tenant];
+        let mut all = vec![executable, tenant];
         all.extend(
             [
                 CONFIG_FILE,
@@ -740,6 +848,7 @@ pub async fn checks(invocation: &mut Invocation) -> Result<Vec<Check>, CliError>
         ),
     };
     Ok(vec![
+        executable,
         tenant,
         config_check,
         environment,
@@ -883,6 +992,125 @@ mod tests {
                 check(Status::Warn)
             ]),
             (true, "2 checks failed".into())
+        );
+    }
+
+    /// The Executable check (§21.15) over a private directory tree: `PATH` order, the
+    /// executable bit, symlinks, the copies in the executable's own directory, the npm
+    /// launcher, relative entries and an unknown executable.
+    #[test]
+    fn executable_check() {
+        use std::os::unix::fs::symlink;
+        let dir = crate::store::testdir::TestDir::new("doctor-executable");
+        let root = dir.path();
+        let exe = dir.write("install/bin/airs", b"x", 0o755);
+        dir.write("install/bin/airs-cli", b"copy", 0o755);
+        dir.write(&format!("install/bin/{}", PROGRAM_NAMES[2]), b"copy", 0o755);
+        let other = dir.write("other/airs", b"y", 0o755);
+        dir.write("noexec/airs", b"z", 0o644);
+        dir.write("npm/lib/node_modules/pkg/bin/airs.js", b"js", 0o755);
+        std::fs::create_dir_all(root.join("links")).unwrap();
+        symlink(&exe, root.join("links/airs")).unwrap();
+        symlink(
+            root.join("npm/lib/node_modules/pkg/bin/airs.js"),
+            root.join("links/airs-cli"),
+        )
+        .unwrap();
+        let program = RunningProgram {
+            exe: Some(std::fs::canonicalize(&exe).unwrap()),
+            launcher: None,
+        };
+        let path = |dirs: &[&str]| {
+            std::env::join_paths(dirs.iter().map(|d| {
+                if d.starts_with('/') || d.is_empty() || *d == "." {
+                    PathBuf::from(d)
+                } else {
+                    root.join(d)
+                }
+            }))
+            .unwrap()
+        };
+        let pass = |check: Check| {
+            assert_eq!(
+                (check.name, check.status, check.detail.as_str(), check.hint),
+                (EXECUTABLE, Status::Pass, EXECUTABLE_PASS, None)
+            );
+        };
+        // Nothing on PATH, no PATH, its own directory, and a non-executable file first.
+        pass(check_executable(Some(&path(&["/nonexistent"])), &program));
+        pass(check_executable(None, &program));
+        pass(check_executable(Some(&path(&["install/bin"])), &program));
+        pass(check_executable(
+            Some(&path(&["noexec", "install/bin"])),
+            &program,
+        ));
+        // Another airs first: a warning naming it; the copies after it change nothing.
+        let check = check_executable(Some(&path(&["other", "install/bin"])), &program);
+        assert_eq!(check.status, Status::Warn);
+        assert_eq!(
+            check.detail,
+            format!(
+                "airs on PATH is another program: {}",
+                std::fs::canonicalize(&other).unwrap().display()
+            )
+        );
+        assert_eq!(check.hint.as_deref(), Some(EXECUTABLE_HINT));
+        // A link to this executable is this program; a link to something else names both
+        // paths, and a relative entry is ignored.
+        let links = root.join("links");
+        let check = check_executable(Some(&path(&[".", "links", "install/bin"])), &program);
+        assert_eq!(check.status, Status::Warn);
+        assert_eq!(
+            check.detail,
+            format!(
+                "airs-cli on PATH is another program: {} ({})",
+                links.join("airs-cli").display(),
+                std::fs::canonicalize(root.join("npm/lib/node_modules/pkg/bin/airs.js"))
+                    .unwrap()
+                    .display()
+            )
+        );
+        // Started by that npm launcher, the link is this program.
+        let npm = RunningProgram {
+            launcher: Some(
+                std::fs::canonicalize(root.join("npm/lib/node_modules/pkg/bin/airs.js")).unwrap(),
+            ),
+            ..program
+        };
+        pass(check_executable(
+            Some(&path(&["links", "install/bin"])),
+            &npm,
+        ));
+        // Every shadowed name, in order, joined.
+        let check = check_executable(
+            Some(&path(&["other", "links"])),
+            &RunningProgram {
+                exe: Some(std::fs::canonicalize(root.join("noexec/airs")).unwrap()),
+                launcher: None,
+            },
+        );
+        assert_eq!(check.status, Status::Warn);
+        assert_eq!(
+            check.detail.matches("on PATH is another program").count(),
+            2
+        );
+        assert!(check.detail.starts_with("airs on PATH"), "{}", check.detail);
+        assert!(
+            check.detail.contains("; airs-cli on PATH"),
+            "{}",
+            check.detail
+        );
+        // An unknown executable skips, whatever PATH holds.
+        let unknown = check_executable(
+            Some(&path(&["other"])),
+            &RunningProgram {
+                exe: None,
+                launcher: None,
+            },
+        );
+        assert_eq!(
+            (unknown.status, unknown.detail.as_str()),
+            (Status::Skip, "the running executable cannot be determined")
         );
     }
 

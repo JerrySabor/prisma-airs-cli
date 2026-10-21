@@ -128,15 +128,15 @@ pub use compare::{
 pub use encoding::{base64_encode, form_decode, payload_hash, percent_encode};
 pub use pty::{PtyRun, PtySession, spawn_pty, spawn_pty_all, spawn_pty_with};
 pub use runner::{
-    Cli, DEFAULT_TIMEOUT, PATH_FLAGS, PATH_VARIABLES, Run, RunOptions, Running, SIGNAL_MARKER_VAR,
-    SUPPORTED_NODE_MAJOR, StdinSource, TS_ENDPOINT_VARIABLES, TS_ENTRY_RELATIVE, bulk_command,
-    check_reference_clone, child_environment, escape_violation, escape_violation_within,
-    import_source_violation, is_dlp_command, is_gateway_command, is_import_command,
-    is_model_security_command, is_redteam_command, is_runtime_command, is_runtime_extras_command,
-    is_supplychain_command, is_tenant_command, parity_available, pinned_reference_commit,
-    reference, require_ts, restore_file_argument, resume_state_argument, run, spawn,
-    ts_bulk_home_violation, ts_trap_removal_violation, upload_file_argument, uv_hook_violation,
-    workspace_root,
+    Cli, DEFAULT_TIMEOUT, PATH_FLAGS, PATH_VARIABLES, PROGRAM_NAMES, Run, RunOptions, Running,
+    SIGNAL_MARKER_VAR, SUPPORTED_NODE_MAJOR, StdinSource, TS_ENDPOINT_VARIABLES, TS_ENTRY_RELATIVE,
+    bulk_command, check_reference_clone, child_environment, escape_violation,
+    escape_violation_within, import_source_violation, is_dlp_command, is_gateway_command,
+    is_import_command, is_model_security_command, is_redteam_command, is_runtime_command,
+    is_runtime_extras_command, is_supplychain_command, is_tenant_command, parity_available,
+    path_without_programs, pinned_reference_commit, reference, require_ts, restore_file_argument,
+    resume_state_argument, run, spawn, ts_bulk_home_violation, ts_trap_removal_violation,
+    upload_file_argument, uv_hook_violation, workspace_root,
 };
 pub use sandbox::{
     ENDPOINT_KEYS, FixtureConfig, FixtureTenant, RegistryEntry, Sandbox, SecretForm, Snapshot,

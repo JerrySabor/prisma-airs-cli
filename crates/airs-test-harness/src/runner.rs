@@ -507,7 +507,8 @@ pub fn run(cli: &Cli, sandbox: &Sandbox, args: &[&str], options: &RunOptions) ->
 }
 
 /// Starts `cli` with stdin `/dev/null`, cwd `sandbox.cwd()` and exactly this
-/// environment: `PATH` (inherited), `HOME=<sandbox>/home`, `TMPDIR=<sandbox>/tmp`,
+/// environment: `PATH` (inherited, without the entries that hold an `airs`, `airs-cli`
+/// or `airs-cli-rs`, [`path_without_programs`]), `HOME=<sandbox>/home`, `TMPDIR=<sandbox>/tmp`,
 /// `PRISMA_AIRS_TENANTS_PATH=<sandbox>/state/tenants.json`,
 /// `AIRS_CLI_CONFIG_DIR=<sandbox>/store`, `NO_COLOR=1`,
 /// `NO_PROXY=127.0.0.1,localhost`, then `options.env`, minus `options.remove_env`.
@@ -1379,6 +1380,25 @@ pub(crate) fn rust_store_dir(env: &BTreeMap<String, String>, cwd: &Path) -> Opti
         .map(|home| home.join(".config/airs-cli"))
 }
 
+/// The program names the doctor's `Executable` check looks for on `PATH` (DESIGN §21.15).
+pub const PROGRAM_NAMES: [&str; 3] = ["airs", "airs-cli", "airs-cli-rs"];
+
+/// `path` without the entries that hold an `airs`, `airs-cli` or `airs-cli-rs` (any
+/// file type): an installed copy, or an unrelated program of that name, on the
+/// developer's `PATH` would otherwise change the doctor's `Executable` check (DESIGN
+/// §21.15), so the inherited `PATH` never carries one. A test that wants one sets `PATH`
+/// in its [`RunOptions`].
+pub fn path_without_programs(path: &std::ffi::OsStr) -> OsString {
+    let kept: Vec<PathBuf> = std::env::split_paths(path)
+        .filter(|dir| {
+            !PROGRAM_NAMES
+                .iter()
+                .any(|name| std::fs::symlink_metadata(dir.join(name)).is_ok())
+        })
+        .collect();
+    std::env::join_paths(kept).unwrap_or_else(|_| OsString::from("/usr/bin:/bin"))
+}
+
 /// The exact environment [`spawn`] gives a child in `sandbox`: the allowlist
 /// (`PATH`, `HOME`, `TMPDIR`, `PRISMA_AIRS_TENANTS_PATH`, `AIRS_CLI_CONFIG_DIR`,
 /// `NO_COLOR`, `NO_PROXY`), then
@@ -1393,6 +1413,7 @@ pub fn child_environment(sandbox: &Sandbox, options: &RunOptions) -> BTreeMap<St
 /// `options.remove_env`.
 fn child_env(sandbox: &Sandbox, options: &RunOptions) -> BTreeMap<String, String> {
     let path = std::env::var_os("PATH").unwrap_or_else(|| OsString::from("/usr/bin:/bin"));
+    let path = path_without_programs(&path);
     let mut env = BTreeMap::new();
     for (name, value) in [
         ("PATH", path),
