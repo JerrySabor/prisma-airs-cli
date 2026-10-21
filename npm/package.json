@@ -1,0 +1,38 @@
+{
+  "name": "@cdot65/prisma-airs-cli",
+  "version": "0.0.0",
+  "description": "Prisma AIRS CLI (the airs command): the native Rust airs-cli, as prebuilt binaries",
+  "license": "Apache-2.0",
+  "homepage": "https://cdot65.github.io/prisma-airs-cli/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://git.cdot.io/cdot/prisma-airs-cli.git",
+    "directory": "npm"
+  },
+  "keywords": [
+    "prisma-airs",
+    "ai-security",
+    "cli",
+    "paloaltonetworks"
+  ],
+  "type": "module",
+  "bin": {
+    "airs": "bin/airs.js",
+    "airs-cli": "bin/airs.js"
+  },
+  "files": [
+    "bin/airs.js",
+    "lib/launcher.js",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@cdot65/prisma-airs-cli-darwin-arm64": "npm:@cdot65/prisma-airs-cli@0.0.0-darwin-arm64",
+    "@cdot65/prisma-airs-cli-linux-x64": "npm:@cdot65/prisma-airs-cli@0.0.0-linux-x64",
+    "@cdot65/prisma-airs-cli-linux-arm64": "npm:@cdot65/prisma-airs-cli@0.0.0-linux-arm64"
+  }
+}
