@@ -21,9 +21,6 @@ env:
   RUST_BACKTRACE: '1'
   MSRV: '1.89'
   PNPM_VERSION: '10.6.5'
-  TS_REFERENCE_REPO: ssh://git@git-ssh.cdot.io/cdot/prisma-airs-cli.git
-  # Pinned host key of the TS repository's ssh endpoint. Never ssh-keyscan at runtime.
-  TS_REFERENCE_HOST_KEY: git-ssh.cdot.io ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKtuYHqMJ4FvimQ97xCTrksDM4a3cByxYbVzGtYQI4vg
 
 jobs:
   linux:
@@ -36,6 +33,9 @@ jobs:
       - uses: https://github.com/actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+          # The whole history and the tags: the TypeScript reference is a commit in this
+          # repository's own history (docs/TESTING.md §3).
+          fetch-depth: 0
 
       - name: Install Rust (stable with rustfmt and clippy, plus the MSRV)
         id: rust
@@ -90,35 +90,12 @@ jobs:
           path: .reference/prisma-airs-cli
           key: ts-reference-v1-linux-${{ runner.arch }}-node${{ steps.pin.outputs.node }}-${{ steps.pin.outputs.commit }}-${{ hashFiles('scripts/build-reference-cli.sh') }}
 
-      - name: Fetch the TypeScript source with the read-only deploy key
-        if: steps.refcache.outputs.cache-hit != 'true'
-        env:
-          TS_REFERENCE_SSH_KEY: ${{ secrets.TS_REFERENCE_SSH_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "${TS_REFERENCE_SSH_KEY:-}" ]; then
-            echo "TS_REFERENCE_SSH_KEY is not available to this run (a pull request from a fork gets no secrets)." >&2
-            exit 1
-          fi
-          dir="$RUNNER_TEMP/ts-reference-ssh"
-          trap 'rm -rf "$dir"' EXIT
-          ( umask 077 && mkdir -p "$dir" && printf '%s\n' "$TS_REFERENCE_SSH_KEY" > "$dir/key" )
-          chmod 600 "$dir/key"
-          printf '%s\n' "$TS_REFERENCE_HOST_KEY" > "$dir/known_hosts"
-          export GIT_SSH_COMMAND="ssh -i $dir/key -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$dir/known_hosts -o GlobalKnownHostsFile=/dev/null"
-          git clone --bare --quiet "$TS_REFERENCE_REPO" "$RUNNER_TEMP/ts-source.git"
-          git -C "$RUNNER_TEMP/ts-source.git" cat-file -e "${{ steps.pin.outputs.commit }}^{commit}"
-
-      - name: Remove the deploy key
-        if: always()
-        run: rm -rf "$RUNNER_TEMP/ts-reference-ssh"
-
       - name: Build the TypeScript reference
         run: |
           set -euo pipefail
-          if [ -d "$RUNNER_TEMP/ts-source.git" ]; then
-            export AIRS_TS_SOURCE="$RUNNER_TEMP/ts-source.git"
-          fi
+          # On a cache miss the script clones the pin from this checkout's own history
+          # (fetch-depth 0 above), so no key or second clone over the network is needed.
+          export AIRS_TS_SOURCE="$GITHUB_WORKSPACE"
           scripts/build-reference-cli.sh
           scripts/build-reference-cli.sh --verify
 

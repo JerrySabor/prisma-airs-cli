@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds the TypeScript reference CLI (airs-cli) that the parity tests run against.
+# Builds the TypeScript reference CLI (airs-cli) that the parity tests run against,
+# from the pinned TypeScript commit in this repository's own history.
 # usage() below holds the usage text (--help prints it).
 set -euo pipefail
 
@@ -14,18 +15,24 @@ Builds the TypeScript reference CLI (airs-cli) that the parity tests run against
   scripts/build-reference-cli.sh --clone-only  clone/check out and verify HEAD; no pnpm
 
 Environment:
-  AIRS_TS_SOURCE   git source to clone (default: the sibling ../prisma-airs-cli checkout)
+  AIRS_TS_SOURCE   git source to clone: a URL or a local repository path (default: this
+                   repository's Forgejo URL, ssh://git@git-ssh.cdot.io/cdot/prisma-airs-cli.git;
+                   AIRS_TS_SOURCE=. clones this checkout's own history, offline)
   AIRS_TS_COMMIT   pinned commit (default below; parity expectations are tied to it)
 
-The source checkout is only read (git clone --no-hardlinks). The clone lands in
-.reference/prisma-airs-cli (gitignored). `pnpm install` downloads npm packages; it is
-skipped by --verify and --dry-run and when the build is already current.
+The TypeScript reference is a commit in this repository's own history (the TypeScript
+CLI lived here until the Rust CLI replaced it). A local source is only read
+(git clone --no-hardlinks). The clone lands in .reference/prisma-airs-cli (gitignored).
+`pnpm install` downloads npm packages; it is skipped by --verify and --dry-run and when
+the build is already current.
 USAGE
 }
 
 PINNED_COMMIT="${AIRS_TS_COMMIT:-5711012246d325f20dbe93b710dcc697a7f18a8a}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCE="${AIRS_TS_SOURCE:-$(cd "$ROOT/.." && pwd)/prisma-airs-cli}"
+# This repository's own Forgejo URL: the pin is a commit in its history.
+REPOSITORY_URL="ssh://git@git-ssh.cdot.io/cdot/prisma-airs-cli.git"
+SOURCE="${AIRS_TS_SOURCE:-$REPOSITORY_URL}"
 DEST="$ROOT/.reference/prisma-airs-cli"
 ENTRY="$DEST/dist/cli/index.js"
 
@@ -124,9 +131,11 @@ if [ "$mode" = build ] && is_current && [ "$force" -eq 0 ]; then
   exit 0
 fi
 
-[ -d "$SOURCE" ] || die "source checkout $SOURCE not found (set AIRS_TS_SOURCE)"
-git -C "$SOURCE" cat-file -e "$PINNED_COMMIT^{commit}" 2>/dev/null \
-  || die "commit $PINNED_COMMIT is not in $SOURCE"
+# A local source (a directory) is checked before cloning; a URL after (below).
+if [ -d "$SOURCE" ]; then
+  git -C "$SOURCE" cat-file -e "$PINNED_COMMIT^{commit}" 2>/dev/null \
+    || die "commit $PINNED_COMMIT is not in $SOURCE"
+fi
 
 if [ ! -d "$DEST/.git" ]; then
   [ ! -e "$DEST" ] || die "$DEST exists but is not a git clone; remove it first"
@@ -135,8 +144,10 @@ if [ ! -d "$DEST/.git" ]; then
   git clone --no-hardlinks --no-checkout "$SOURCE" "$DEST"
 else
   clone_clean || die "tracked files in $DEST are modified; refusing to check out over them"
-  git -C "$DEST" fetch --quiet origin
+  git -C "$DEST" fetch --quiet --tags origin
 fi
+git -C "$DEST" cat-file -e "$PINNED_COMMIT^{commit}" 2>/dev/null \
+  || die "commit $PINNED_COMMIT is not in $SOURCE"
 git -C "$DEST" -c advice.detachedHead=false checkout --quiet --detach "$PINNED_COMMIT"
 head="$(clone_head)"
 [ "$head" = "$PINNED_COMMIT" ] || die "clone HEAD is $head after checkout, expected $PINNED_COMMIT"

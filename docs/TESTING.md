@@ -76,10 +76,16 @@ with `AIRS_ALLOW_PARITY_SKIP=1` (§3.3).
 
 ### 3.1 Building it
 
-`scripts/build-reference-cli.sh` clones the sibling TypeScript checkout
-(`../prisma-airs-cli`) into `.reference/prisma-airs-cli` (gitignored), checks out the
-pinned commit and builds it with pnpm. The source checkout is only read
-(`git clone --no-hardlinks`).
+The TypeScript reference lives in this repository's own history. The TypeScript CLI
+was developed in `cdot/prisma-airs-cli` until the Rust CLI replaced it (8.0); its
+sources, tests and lockfiles were deleted from the tree but stay in the history and in
+every `v7.*` tag, so the pinned commit is a commit of this repository.
+`scripts/build-reference-cli.sh` clones this repository from its Forgejo URL
+(`ssh://git@git-ssh.cdot.io/cdot/prisma-airs-cli.git`, the default `AIRS_TS_SOURCE`) into
+`.reference/prisma-airs-cli` (gitignored), checks out the pinned commit and builds it with
+pnpm. `AIRS_TS_SOURCE=.` clones this checkout's own history instead (offline, as CI
+does, §10); a local source is only read (`git clone --no-hardlinks`). The working tree
+is never checked out to the pin: the reference is always a separate clone.
 
 | Invocation | Effect |
 |---|---|
@@ -96,7 +102,7 @@ Script environment:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AIRS_TS_SOURCE` | `../prisma-airs-cli` | Git source to clone. |
+| `AIRS_TS_SOURCE` | `ssh://git@git-ssh.cdot.io/cdot/prisma-airs-cli.git` (this repository) | Git source to clone: a URL or a local repository path (`.` for this checkout). |
 | `AIRS_TS_COMMIT` | the `PINNED_COMMIT` in the script | Commit to check out. |
 
 ### 3.2 Pin and Node version
@@ -1511,24 +1517,22 @@ Notes:
   hands it the workspace and the cargo home, and runs `cargo test` as that user.
 - **The TypeScript reference.** The job reads the pin from `PINNED_COMMIT` in
   `scripts/build-reference-cli.sh` and restores `.reference/prisma-airs-cli` from the
-  cache keyed on that commit, the Node major and the script's hash. On a miss it clones
-  `ssh://git@git-ssh.cdot.io/cdot/prisma-airs-cli.git` (anonymous https clones are not
-  allowed) with the read-only deploy key in the Actions secret `TS_REFERENCE_SSH_KEY`.
-  The key is written to a `0600` file under `RUNNER_TEMP` and removed when the step
-  ends and again in an `always()` step. ssh uses `IdentitiesOnly=yes`,
-  `StrictHostKeyChecking=yes` and a temporary `known_hosts` holding the host key pinned
-  in the workflow's `TS_REFERENCE_HOST_KEY`; nothing is scanned at runtime. The script
-  then builds from that bare clone (`AIRS_TS_SOURCE`) and `--verify` checks the result.
-  If the server's host key changes, update `TS_REFERENCE_HOST_KEY`.
-- **Pull requests from forks** get no secrets. They pass only while the reference cache
-  is warm; on a miss the clone step fails with a message saying the key is missing.
+  cache keyed on that commit, the Node major and the script's hash. The checkout fetches
+  the whole history and the tags (`fetch-depth: 0`), so on a miss the script clones the
+  pin from the checkout itself (`AIRS_TS_SOURCE="$GITHUB_WORKSPACE"`, §3.1): no deploy
+  key, secret or second network clone is involved. `--verify` then checks the result.
+  (Before the Rust CLI moved into this repository, CI cloned the TypeScript repository
+  with a read-only deploy key in the secret `TS_REFERENCE_SSH_KEY`; that secret is no
+  longer used.)
+- **Pull requests from forks** need no secret for the reference either: the pinned
+  commit is in the history they are based on.
 - **Self-hosted macOS runner (`jadzia`).** A macOS runner has no container: every job
   runs directly on the host as the runner's user, and a pull request's `build.rs`,
   proc macros and tests run during `cargo build` and `cargo test`. Its workflow never runs
   for pull requests, but a fork pull request could add one that does, so the runner
   setup is what protects the host. Before dispatching `ci-macos.yml` (or adding a
   push trigger to it):
-  - register the runner at repository scope for `cdot/prisma-airs-cli-rs` only, never
+  - register the runner at repository scope for `cdot/prisma-airs-cli` only, never
     for the instance, an organisation or a user;
   - run it as a dedicated non-admin macOS user with no login keychain entries, no
     Developer ID key, no notary profile, no Forgejo token, and no access to
@@ -1550,5 +1554,5 @@ Notes:
   `Argument list too long (os error 7)`. Keep each argument under 128 KiB
   (`tests/scan.rs::request::large_prompt_is_sent_byte_exact` uses 120 KiB).
 - **Results.** The Forgejo API lists each job's outcome:
-  `GET /api/v1/repos/cdot/prisma-airs-cli-rs/actions/tasks`. Job logs are only in the
+  `GET /api/v1/repos/cdot/prisma-airs-cli/actions/tasks`. Job logs are only in the
   web UI.
