@@ -278,3 +278,28 @@ jobs:
           path: dist/aarch64-unknown-linux-musl/
           if-no-files-found: error
           retention-days: 14
+
+  # The docs site (docs-site/, Docusaurus). onBrokenLinks and onBrokenAnchors are 'throw',
+  # so a broken link or anchor fails this job. The command reference it publishes is
+  # checked against the CLI by tests/cli_reference.rs in the linux job.
+  docs-site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: https://github.com/actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: https://github.com/pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          package_json_file: docs-site/package.json
+
+      - uses: https://github.com/actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+
+      - name: Install the docs-site dependencies
+        run: pnpm -C docs-site install --frozen-lockfile
+
+      - name: Build the docs site (broken links and anchors fail)
+        run: pnpm -C docs-site build

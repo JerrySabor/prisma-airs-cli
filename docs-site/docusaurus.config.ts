@@ -7,7 +7,7 @@ import airsTheme from './src/css/prism-airs';
 const config: Config = {
   title: 'Prisma AIRS CLI',
   tagline:
-    'CLI and library for Palo Alto Prisma AIRS — guardrail refinement, AI red teaming, model security scanning, profile audits',
+    'The airs command line for Palo Alto Networks Prisma AIRS: runtime security, DLP, AI red teaming, model security, AI Gateway and AI supply chain',
   favicon: 'img/brand-logo.png',
 
   future: {
@@ -47,7 +47,7 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
-          // Docs are served at the site root to preserve the existing mkdocs URLs.
+          // Docs are served at the site root; the landing page is src/pages/index.tsx.
           routeBasePath: '/',
         },
         blog: false,
@@ -89,20 +89,14 @@ const config: Config = {
         },
         {
           type: 'docSidebar',
-          sidebarId: 'cli',
+          sidebarId: 'reference',
           position: 'left',
-          label: 'CLI Reference',
+          label: 'Command reference',
         },
         {
-          to: '/cli/aigateway/workflows/',
-          label: 'AI Gateway',
-          position: 'left',
-        },
-        {
-          type: 'docSidebar',
-          sidebarId: 'developers',
-          position: 'left',
-          label: 'Developers',
+          href: 'https://cdot65.github.io/scm-sdk-rs/',
+          label: 'SDK',
+          position: 'right',
         },
         {
           href: 'https://git.cdot.io/cdot/prisma-airs-cli',
@@ -117,17 +111,19 @@ const config: Config = {
         {
           title: 'Docs',
           items: [
-            { label: 'Getting Started', to: '/getting-started/installation' },
-            { label: 'CLI Reference', to: '/cli/' },
-            { label: 'AI Gateway', to: '/cli/aigateway/workflows/' },
-            { label: 'Library', to: '/developers/library/getting-started' },
+            { label: 'Install', to: '/getting-started/install' },
+            { label: 'Upgrading from 7.x', to: '/getting-started/upgrading-from-typescript' },
+            { label: 'Configuration', to: '/getting-started/configuration' },
+            { label: 'Command reference', to: '/reference/commands/' },
           ],
         },
         {
           title: 'More',
           items: [
+            { label: 'scm-sdk (Rust SDK)', href: 'https://cdot65.github.io/scm-sdk-rs/' },
             { label: 'Forgejo', href: 'https://git.cdot.io/cdot/prisma-airs-cli' },
             { label: 'npm', href: 'https://www.npmjs.com/package/@cdot65/prisma-airs-cli' },
+            { label: 'crates.io', href: 'https://crates.io/crates/airs-cli' },
           ],
         },
       ],

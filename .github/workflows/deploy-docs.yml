@@ -1,5 +1,7 @@
 name: Deploy Docs
 
+# Runs on the GitHub mirror. The Forgejo `docs-release` workflow creates the
+# `airs-docs-<full commit SHA>` tag after CI passed on main; the push mirror copies it here.
 on:
   push:
     tags: ['airs-docs-*']
@@ -30,19 +32,21 @@ jobs:
           test "$RELEASE_REF" = "$expected"
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
 
+      # The Docusaurus site in docs-site/ is the only Node project in the repository;
+      # pnpm's version comes from its packageManager field (pnpm@10.6.5).
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          package_json_file: docs-site/package.json
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-
-      - name: Generate API reference
-        run: pnpm docs:api
+          cache-dependency-path: docs-site/pnpm-lock.yaml
 
       - name: Install docs-site deps
         run: pnpm -C docs-site install --frozen-lockfile
 
+      # onBrokenLinks/onBrokenAnchors: 'throw' fail the build on any broken link.
       - name: Build Docusaurus site
         run: pnpm -C docs-site build
 

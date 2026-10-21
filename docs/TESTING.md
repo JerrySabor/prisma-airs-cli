@@ -163,6 +163,7 @@ the code.
 | `AIRS_RS_LIVE_DUMP` | `live/redteam.rs` | A directory (diagnosis only). The red team reads write every row's stdout and stderr of both CLIs into it, one file per row, CLI and stream (`<check>.rs.stdout`, `<check>.ts.stderr`, …; the directory is created 0700, the files 0600). The files can hold tenant data and are never printed; nothing is removed afterwards, so delete the directory yourself. Unset or empty: nothing is written. |
 | `PRISMA_AIRS_TENANTS_PATH`, `XDG_STATE_HOME`, `HOME` | `live.rs` | Locate the real registry for the live tier, resolved as in DESIGN §3.1. |
 | `PATH` | `runner.rs`, `live.rs` | Passed to every child; also where node is found. |
+| `AIRS_UPDATE_CLI_REFERENCE` | `tests/cli_reference.rs` | `1`: rewrite the docs site's command reference (`docs-site/docs/reference/commands/`) instead of checking it (§5.23); `scripts/cli-reference.sh` sets it. Any other value checks. |
 | `AIRS_BENCH_PYTHON` | `examples/bench.rs` only | The Python interpreter of the benchmark's timing helper (default: what `python3` on `PATH` resolves to). See [BENCHMARKS.md](BENCHMARKS.md). |
 
 `NO_COLOR=1` is always set for children. `CLICOLOR_FORCE` is never passed to them,
@@ -936,6 +937,19 @@ with a cleared environment, `HOME` and `TMPDIR` inside a fresh directory under
   the test notes a skip where `/usr/bin/codesign` cannot verify the copy). `release.sh --dry-run` itself needs `origin`, the
   Forgejo API and the keychain, so it is run by hand (RELEASING §2), never by a test.
 
+### 5.23 The docs site's command reference
+
+`tests/cli_reference.rs` walks `airs <path> --help` from the root down (each help's
+`Commands:` block), with no tenant, a cleared environment and `PATH=/usr/bin:/bin`, so no
+request is sent. It renders one CommonMark page per top-level command plus `index.md` (each
+command's help in a fenced `text` block under a heading naming the command) and compares
+them with the committed pages under `docs-site/docs/reference/commands/`. A stale, missing
+or extra page fails the test, naming the files and `scripts/cli-reference.sh`. After
+changing a command, a flag or a help text, run `scripts/cli-reference.sh` (it runs the test
+with `AIRS_UPDATE_CLI_REFERENCE=1`, which rewrites the pages and removes extra ones) and
+commit the result; `scripts/cli-reference.sh --check` runs the check alone. The docs site
+build itself (broken links and anchors fail it) runs in the CI `docs-site` job (§10).
+
 ## 6. The live tier
 
 The live tier compares both CLIs against one real tenant. Only the user runs it.
@@ -1502,6 +1516,7 @@ live tier (§6) is only run by hand. Releases are cut separately
 |---|---|---|
 | `linux` | `ubuntu-latest` (Ubuntu 22.04 container, as root) | rustup stable with rustfmt and clippy; Node 24 and pnpm 10.6.5; the TypeScript reference (below); `jq` (installed with `apt-get` when the image lacks it, for `tests/homebrew_formula.rs`); `cargo fmt --all --check`; `cargo clippy --workspace --all-targets --locked -- -D warnings`; `cargo +1.89 check --workspace --all-targets --locked` (the MSRV); `AIRS_REQUIRE_PARITY=1 cargo test --workspace --locked --no-fail-fast` |
 | `musl` | `ubuntu-latest` | `cargo zigbuild --release` for `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl` (zig 0.17.0, checksum-verified; cargo-zigbuild 0.23.4); a smoke test of the native binary (`--version` of `airs` and of the compatibility name, then `tenant list --output json` with `AIRS_CLI_CONFIG_DIR` pointing at an empty directory, which must print `[]`); both `airs` binaries uploaded as artifacts `airs-cli-<target>` with an `airs.sha256` file |
+| `docs-site` | `ubuntu-latest` | Node 24 and pnpm 10.6.5 (from `docs-site/package.json`'s `packageManager`); `pnpm -C docs-site install --frozen-lockfile`; `pnpm -C docs-site build`, where `onBrokenLinks` and `onBrokenAnchors` are `throw`, so a broken link or anchor fails the job. The Forgejo `docs-release` workflow requires it (with `linux` and `musl`) to pass on `main` before it tags `airs-docs-<sha>`, which the GitHub mirror's `deploy-docs.yml` publishes to <https://cdot65.github.io/prisma-airs-cli/>. |
 | `macos` (`.forgejo/workflows/ci-macos.yml`) | `macos-arm64`, a placeholder for the maintainer's runner `jadzia` | The `linux` checks, `continue-on-error`. Its own workflow, run only on demand (`workflow_dispatch`): Forgejo evaluates a job's `if` only once a runner with its label picks the job up, so a macOS job in `ci.yml` left every push run waiting forever while no runner serves the label. Rename the label and dispatch it once `jadzia` is online and meets the self-hosted runner requirements below. |
 
 Notes:
