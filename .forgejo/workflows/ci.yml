@@ -1,0 +1,280 @@
+# CI for airs-cli-rs. docs/TESTING.md ("Continuous integration") explains each job.
+#
+# Every test runs on loopback. AIRS_RS_LIVE is never set here: the live tier is run
+# only by the maintainer, by hand.
+name: CI
+
+on:
+  push:
+    branches: [main, 'ci/**']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # pnpm/action-setup has no Node 24 major yet; force it (and any JS action) onto Node 24.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: '0'
+  # No debug info: smaller target/ (and cache), faster links. Tests do not need it.
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+  RUST_BACKTRACE: '1'
+  MSRV: '1.89'
+  PNPM_VERSION: '10.6.5'
+  TS_REFERENCE_REPO: ssh://git@git-ssh.cdot.io/cdot/prisma-airs-cli.git
+  # Pinned host key of the TS repository's ssh endpoint. Never ssh-keyscan at runtime.
+  TS_REFERENCE_HOST_KEY: git-ssh.cdot.io ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKtuYHqMJ4FvimQ97xCTrksDM4a3cByxYbVzGtYQI4vg
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CARGO_HOME: /opt/rust/cargo
+      RUSTUP_HOME: /opt/rust/rustup
+    steps:
+      - uses: https://github.com/actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust (stable with rustfmt and clippy, plus the MSRV)
+        id: rust
+        run: |
+          set -euo pipefail
+          if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
+          fi
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+          export PATH="$CARGO_HOME/bin:$PATH"
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup toolchain install "$MSRV" --profile minimal
+          rustup default stable
+          rustc --version
+          cargo --version
+          echo "key=$(rustc -vV | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the cargo cache
+        uses: https://github.com/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            /opt/rust/cargo/registry/index
+            /opt/rust/cargo/registry/cache
+            /opt/rust/cargo/git/db
+            target
+          key: cargo-linux-${{ runner.arch }}-${{ steps.rust.outputs.key }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-linux-${{ runner.arch }}-${{ steps.rust.outputs.key }}-
+
+      - uses: https://github.com/pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: https://github.com/actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+
+      - name: Read the reference pin
+        id: pin
+        run: |
+          set -euo pipefail
+          commit=$(sed -n 's/^PINNED_COMMIT="\${AIRS_TS_COMMIT:-\([0-9a-f]\{40\}\)}"$/\1/p' scripts/build-reference-cli.sh)
+          [ "${#commit}" -eq 40 ] || { echo "cannot read PINNED_COMMIT from scripts/build-reference-cli.sh" >&2; exit 1; }
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "node=$(node --version | cut -d. -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the TypeScript reference build
+        id: refcache
+        uses: https://github.com/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .reference/prisma-airs-cli
+          key: ts-reference-v1-linux-${{ runner.arch }}-node${{ steps.pin.outputs.node }}-${{ steps.pin.outputs.commit }}-${{ hashFiles('scripts/build-reference-cli.sh') }}
+
+      - name: Fetch the TypeScript source with the read-only deploy key
+        if: steps.refcache.outputs.cache-hit != 'true'
+        env:
+          TS_REFERENCE_SSH_KEY: ${{ secrets.TS_REFERENCE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TS_REFERENCE_SSH_KEY:-}" ]; then
+            echo "TS_REFERENCE_SSH_KEY is not available to this run (a pull request from a fork gets no secrets)." >&2
+            exit 1
+          fi
+          dir="$RUNNER_TEMP/ts-reference-ssh"
+          trap 'rm -rf "$dir"' EXIT
+          ( umask 077 && mkdir -p "$dir" && printf '%s\n' "$TS_REFERENCE_SSH_KEY" > "$dir/key" )
+          chmod 600 "$dir/key"
+          printf '%s\n' "$TS_REFERENCE_HOST_KEY" > "$dir/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $dir/key -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$dir/known_hosts -o GlobalKnownHostsFile=/dev/null"
+          git clone --bare --quiet "$TS_REFERENCE_REPO" "$RUNNER_TEMP/ts-source.git"
+          git -C "$RUNNER_TEMP/ts-source.git" cat-file -e "${{ steps.pin.outputs.commit }}^{commit}"
+
+      - name: Remove the deploy key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ts-reference-ssh"
+
+      - name: Build the TypeScript reference
+        run: |
+          set -euo pipefail
+          if [ -d "$RUNNER_TEMP/ts-source.git" ]; then
+            export AIRS_TS_SOURCE="$RUNNER_TEMP/ts-source.git"
+          fi
+          scripts/build-reference-cli.sh
+          scripts/build-reference-cli.sh --verify
+
+      - name: cargo fmt
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: cargo check on the MSRV
+        run: cargo +"$MSRV" check --workspace --all-targets --locked --target-dir target/msrv
+
+      - name: Install jq (tests/homebrew_formula.rs needs it; DESIGN §21.14 choice 51)
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo=""
+            [ "$(id -u)" -eq 0 ] || sudo="sudo"
+            $sudo apt-get update -qq
+            $sudo apt-get install -y -qq --no-install-recommends jq
+          fi
+          jq --version
+
+      - name: cargo test (parity required)
+        run: |
+          set -euo pipefail
+          unset AIRS_RS_LIVE AIRS_E2E_TENANT AIRS_E2E_PROFILE AIRS_ALLOW_PARITY_SKIP
+          export AIRS_REQUIRE_PARITY=1
+          if [ "$(id -u)" -eq 0 ]; then
+            # Some tests chmod a file to 0000 and expect it to be unreadable, which root
+            # ignores. Run the suite as an unprivileged user.
+            id ci >/dev/null 2>&1 || useradd --create-home --shell /bin/bash ci
+            chown -R ci:ci "$GITHUB_WORKSPACE" "$CARGO_HOME" "$RUSTUP_HOME"
+            exec setpriv --reuid=ci --regid=ci --init-groups \
+              env HOME=/home/ci cargo test --workspace --locked --no-fail-fast
+          fi
+          cargo test --workspace --locked --no-fail-fast
+
+  musl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_HOME: /opt/rust/cargo
+      RUSTUP_HOME: /opt/rust/rustup
+      ZIG_VERSION: '0.17.0'
+      CARGO_ZIGBUILD_VERSION: '0.23.4'
+    steps:
+      - uses: https://github.com/actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust (stable with the musl targets)
+        id: rust
+        run: |
+          set -euo pipefail
+          if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
+          fi
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+          export PATH="$CARGO_HOME/bin:$PATH"
+          rustup toolchain install stable --profile minimal \
+            --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
+          rustup default stable
+          rustc --version
+          echo "key=$(rustc -vV | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Install zig
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            x86_64) arch=x86_64; sum=1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026 ;;
+            aarch64 | arm64) arch=aarch64; sum=9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8 ;;
+            *) echo "no zig build for $(uname -m)" >&2; exit 1 ;;
+          esac
+          name="zig-$arch-linux-$ZIG_VERSION"
+          curl --proto '=https' --tlsv1.2 -sSfL -o "$RUNNER_TEMP/$name.tar.xz" \
+            "https://ziglang.org/download/$ZIG_VERSION/$name.tar.xz"
+          echo "$sum  $RUNNER_TEMP/$name.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/$name.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/$name/zig" version
+
+      - name: Restore the cargo cache
+        uses: https://github.com/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            /opt/rust/cargo/registry/index
+            /opt/rust/cargo/registry/cache
+            /opt/rust/cargo/git/db
+            /opt/rust/cargo/bin/cargo-zigbuild
+            target
+          key: cargo-musl-${{ runner.arch }}-${{ steps.rust.outputs.key }}-${{ env.CARGO_ZIGBUILD_VERSION }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-musl-${{ runner.arch }}-${{ steps.rust.outputs.key }}-${{ env.CARGO_ZIGBUILD_VERSION }}-
+
+      - name: Install cargo-zigbuild
+        run: |
+          set -euo pipefail
+          if ! cargo-zigbuild --version 2>/dev/null | grep -qx "cargo-zigbuild $CARGO_ZIGBUILD_VERSION"; then
+            cargo install --locked --force cargo-zigbuild --version "$CARGO_ZIGBUILD_VERSION"
+          fi
+          cargo-zigbuild --version
+
+      - name: Build x86_64-unknown-linux-musl
+        run: cargo zigbuild --release --locked --target x86_64-unknown-linux-musl
+
+      - name: Build aarch64-unknown-linux-musl
+        run: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl
+
+      - name: Smoke test the native musl binary (loopback only)
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            x86_64) target=x86_64-unknown-linux-musl ;;
+            aarch64 | arm64) target=aarch64-unknown-linux-musl ;;
+          esac
+          bin="target/$target/release/airs"
+          file "$bin" 2>/dev/null || true
+          expected=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          got=$("$bin" --version)
+          echo "--version: $got"
+          [ "$got" = "$expected" ] || { echo "expected --version $expected" >&2; exit 1; }
+          # The 1.x compatibility name (DESIGN §21.2) is the same program.
+          compat=$("target/$target/release/airs-cli-rs" --version)
+          echo "airs-cli-rs --version: $compat"
+          [ "$compat" = "$expected" ] || { echo "expected airs-cli-rs --version $expected" >&2; exit 1; }
+          smoke="$RUNNER_TEMP/smoke"
+          mkdir -p "$smoke/home" "$smoke/store"
+          chmod 0700 "$smoke/store"
+          out=$(env -i PATH=/usr/bin:/bin HOME="$smoke/home" NO_COLOR=1 \
+            AIRS_CLI_CONFIG_DIR="$smoke/store" "$bin" tenant list --output json)
+          echo "tenant list: $out"
+          [ "$out" = "[]" ] || { echo "expected [] from an empty store" >&2; exit 1; }
+
+      - name: Stage the binaries
+        run: |
+          set -euo pipefail
+          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            mkdir -p "dist/$target"
+            cp "target/$target/release/airs" "dist/$target/"
+            (cd "dist/$target" && sha256sum airs > airs.sha256)
+          done
+
+      # upload-artifact v4 refuses hosts other than github.com, and the
+      # code.forgejo.org fork failed on this instance; v3 works.
+      - uses: https://github.com/actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
+        with:
+          name: airs-cli-x86_64-unknown-linux-musl
+          path: dist/x86_64-unknown-linux-musl/
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: https://github.com/actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
+        with:
+          name: airs-cli-aarch64-unknown-linux-musl
+          path: dist/aarch64-unknown-linux-musl/
+          if-no-files-found: error
+          retention-days: 14

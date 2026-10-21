@@ -1,0 +1,32 @@
+[package]
+name = "airs-test-harness"
+version = "0.0.0"
+description = "Loopback fixture server, tenant sandbox and dual-CLI runner for airs-cli-rs tests"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Test-only crate: the root package lists it under [dev-dependencies] only.
+[dependencies]
+base64 = "0.22"
+# The fake uv archive of the `--fetch-uv` tests (DESIGN §10 M6c); the same exact pin as the CLI's.
+flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
+hmac = "0.12"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+# The pty runner and the lock holder (DESIGN §10, M4t): openpt, termios, flock, uname.
+# The same exact pin as the CLI's; already in the lock file through tempfile.
+rustix = { version = "=1.1.5", features = ["fs", "pty", "termios", "system", "process"] }
+# Never enable `preserve_order`: feature unification would change SDK wire bytes.
+serde_json = "1.0"
+sha2 = "0.10"
+tempfile = "3"
+tokio = { version = "1.50", features = ["rt-multi-thread", "net", "time", "sync", "macros"] }
+# The same parse-only TOML as the CLI (store provisioning and the loopback guard).
+toml = { version = "=1.1.2", default-features = false, features = ["std", "serde", "parse"] }
+url = "2.5"
+
+[lints]
+workspace = true

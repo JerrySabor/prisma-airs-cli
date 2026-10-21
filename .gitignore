@@ -1,0 +1,12 @@
+/target/
+/.reference/
+/.local/
+*.env
+.env*
+credentials*.json
+tenant*.json
+!tests/fixtures/**/tenant*.json
+*.pem
+*.key
+*.log
+.DS_Store

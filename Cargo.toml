@@ -1,0 +1,92 @@
+[workspace]
+members = [".", "crates/airs-test-harness"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.89"
+license = "Apache-2.0"
+repository = "https://git.cdot.io/cdot/prisma-airs-cli-rs"
+authors = ["Calvin Remsburg"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[package]
+# The crate is `airs-cli`; the executable is `airs` (DESIGN §21.2).
+name = "airs-cli"
+version = "1.0.0"
+description = "Native Rust CLI for Prisma AIRS (the airs command), built on the scm-sdk crate"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "README.md"
+keywords = ["prisma-airs", "ai-security", "cli", "paloaltonetworks"]
+categories = ["command-line-utilities"]
+# Only what builds the executable; tests, fixtures, docs and CI stay in the repository.
+include = ["/src/**/*.rs", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]
+default-run = "airs"
+
+[[bin]]
+name = "airs"
+path = "src/main.rs"
+
+# The 1.x compatibility name (DESIGN §21.2): the same program under its 0.x name.
+[[bin]]
+name = "airs-cli-rs"
+path = "src/bin/airs-cli-rs.rs"
+
+[lib]
+name = "airs_cli_rs"
+path = "src/lib.rs"
+
+[dependencies]
+# Published SDK (crates.io scm-sdk 0.2.3).
+# Exact pin: the CLI is qualified against this release only.
+scm = { package = "scm-sdk", version = "=0.2.3", default-features = false, features = ["reqwest-transport", "scan", "management", "red-team", "dlp", "model-security", "gateway", "agentguard"] }
+clap = { version = "4.5", features = ["derive"] }
+# The direct (never proxied) transport for plain-http loopback endpoints (src/clients.rs).
+# Same version and a subset of the features scm-sdk already enables, so feature
+# unification changes nothing in the SDK's own transport.
+reqwest = { version = "=0.13.5", default-features = false, features = ["http2", "gzip", "stream"] }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+# gunzip of the pinned uv archive (`model-security install --fetch-uv`, DESIGN §17.14,
+# choice 35). Already in the lock file through reqwest's gzip; the tar reader is our own.
+flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
+# ECMAScript `Number::toString` for every printed number (DESIGN §2.7); already in the
+# lock file through scm-sdk.
+ryu-js = "=1.0.3"
+# The tenant store (DESIGN §3, §11): `flock`, `O_NOFOLLOW` opens, `fstat`, `uname`,
+# `geteuid` and termios without `unsafe`. Already in the lock file through tempfile.
+rustix = { version = "=1.1.5", features = ["fs", "termios", "system", "process"] }
+serde = { version = "1.0", features = ["derive"] }
+# The environment report's Content-Security-Policy hashes (DESIGN §15.17). Already in the
+# lock file through scm-sdk, with the same features.
+sha2 = { version = "=0.10.9", default-features = false }
+# Never enable `preserve_order`: feature unification would change SDK wire bytes.
+serde_json = "1.0"
+tokio = { version = "1.50", features = ["rt", "macros", "signal", "time", "sync"] }
+# Parse-only TOML for the tenant store (DESIGN §3.2, §3.3); the writers are our own, so
+# no `display` feature, and `preserve_order` stays off.
+toml = { version = "=1.1.2", default-features = false, features = ["std", "serde", "parse"] }
+# Display width for table padding (UAX #11, DESIGN §2.7, D53).
+unicode-width = "0.2"
+url = "2.5"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+airs-test-harness = { path = "crates/airs-test-harness" }
+serde_json = "1.0"
+
+[lints]
+workspace = true
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
