@@ -5,8 +5,8 @@ sidebar_position: 2
 
 # `airs doctor`
 
-`doctor` checks the selected tenant, its config file, the environment, the executable,
-both credential sets and the connectivity of three APIs. It exits 1 when any check fails;
+`doctor` checks the executable on `PATH`, the selected tenant, its config file, the
+environment, both credential sets and the connectivity of three APIs, in nine checks. It exits 1 when any check fails;
 warnings and skips do not change the exit code.
 
 ```sh
@@ -18,10 +18,10 @@ airs --tenant staging doctor
 
 | Check | What it verifies |
 |---|---|
+| Executable | warns when another `airs`, `airs-cli` or `airs-cli-rs` earlier on `PATH` resolves to a different file than the running program; never fails; runs first, before the tenant is read |
 | Tenant | a tenant is selected (or named by `--tenant`) in the store; when the store is empty but a TypeScript registry exists, the hint says to run `airs tenant import` |
 | Config file | the tenant file is private, valid TOML, holds only supported keys with valid values, and its `mgmtTsgId` matches the pinned TSG |
 | Environment | lists ignored configuration variables (`PANW_*` and the retired names) and the proxy variables in effect; never fails |
-| Executable | warns when another `airs`, `airs-cli` or `airs-cli-rs` earlier on `PATH` resolves to a different file than the running program; never fails |
 | Scanner credentials | `airsApiKey` or `airsApiToken` is set (skip when not: scanning is unavailable) |
 | Management credentials | `mgmtClientId`, `mgmtClientSecret` and `mgmtTsgId` are set |
 | Scanner API | one probe of the scan API with the API key, within 5 s |

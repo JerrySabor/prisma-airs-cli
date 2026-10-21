@@ -10,11 +10,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-const SCRIPTS: [&str; 4] = [
+const SCRIPTS: [&str; 5] = [
     "scripts/release.sh",
     "scripts/package-release.sh",
     "scripts/homebrew-formula.sh",
     "scripts/npm-package.sh",
+    "scripts/cli-reference.sh",
 ];
 
 fn root() -> PathBuf {
@@ -153,6 +154,11 @@ fn every_script_prints_its_whole_usage() {
             "scripts/npm-package.sh",
             &["--dist"][..],
             "npm-package: --dist needs a directory\n",
+        ),
+        (
+            "scripts/cli-reference.sh",
+            &["--bogus"][..],
+            "cli-reference: unknown argument: --bogus\n",
         ),
     ] {
         let source = read(script);
