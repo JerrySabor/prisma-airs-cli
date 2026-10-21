@@ -18,13 +18,9 @@ const sha = main.commit.id;
 assert.equal(sha, process.env.GITHUB_SHA, 'Source is no longer main; dispatch again');
 const status = await get(`/commits/${sha}/status?limit=100`);
 const required = [
-  'CI / lint (push)',
-  'CI / typecheck (push)',
-  'CI / test (push)',
-  'CI / docs-build (push)',
-  'CI / consumer-runtime (20.17.0) (push)',
-  'CI / consumer-runtime (22.13.0) (push)',
-  'CI / consumer-runtime (24) (push)',
+  'CI / linux (push)',
+  'CI / musl (push)',
+  'CI / docs-site (push)',
 ];
 for (const context of required) {
   assert.equal(
