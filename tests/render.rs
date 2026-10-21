@@ -452,7 +452,7 @@ mod doctor {
     }
 
     #[test]
-    fn table_has_the_eight_checks_and_nothing_else() {
+    fn table_has_the_nine_checks_and_nothing_else() {
         let fx = fx();
         let out = fx.run(&["doctor", "--output", "table"]);
         assert_eq!((out.code, out.stderr.as_str()), (0, ""));
@@ -468,6 +468,7 @@ mod doctor {
         assert_eq!(
             names,
             [
+                "Executable",
                 "Tenant",
                 "Config file",
                 "Environment",

@@ -1516,8 +1516,13 @@ mod compat {
                 );
             }
             for text in [&main.stdout, &main.stderr] {
+                // The doctor's Executable check lists the names it looks for on PATH
+                // (DESIGN §21.15); no other text names the program anything but `airs`.
+                let text = &text.replace("airs, airs-cli or airs-cli-rs", "the names");
                 assert!(!text.contains("airs-cli-rs"), "{args:?}: {text}");
-                assert!(!text.contains("airs-cli "), "{args:?}: {text}");
+                for invocation in ["Usage: airs-cli", "$ airs-cli", "'airs-cli "] {
+                    assert!(!text.contains(invocation), "{args:?}: {text}");
+                }
             }
         }
         assert_eq!(run_as(&fx, &compat(), &["--version"]).stdout, VERSION_LINE);

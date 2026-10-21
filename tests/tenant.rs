@@ -468,9 +468,12 @@ mod store_path {
                     "HOME is not an absolute path; set AIRS_CLI_CONFIG_DIR or XDG_CONFIG_HOME";
                 if args[0] == "doctor" {
                     assert_eq!(out.code, 1);
-                    assert_eq!(out.json()[0]["detail"], message);
+                    // The first check is Executable (DESIGN §21.15); the Tenant check
+                    // follows.
+                    assert_eq!(out.json()[1]["name"], "Tenant");
+                    assert_eq!(out.json()[1]["detail"], message);
                     assert_eq!(
-                        out.json()[0]["hint"],
+                        out.json()[1]["hint"],
                         "Set AIRS_CLI_CONFIG_DIR or XDG_CONFIG_HOME to an absolute path"
                     );
                 } else {
