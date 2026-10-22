@@ -2294,8 +2294,8 @@ mod contract {
     /// or request, and is never sent or ignored.
     #[test]
     fn an_error_log_skip_is_a_usage_error_before_the_tenant() {
-        let server = FixtureServer::start();
-        let sandbox = Sandbox::new();
+        // A registered tenant on the fixture server, so "nothing sent" can fail.
+        let f = fx();
         let target = fx::target_id(1);
         for args in [
             vec!["targets", "error-logs", target.as_str(), "--skip", "0"],
@@ -2312,7 +2312,7 @@ mod contract {
         ] {
             let mut full = vec!["redteam"];
             full.extend(args.iter().copied());
-            let out = run(&rust(), &sandbox, &full, &RunOptions::new());
+            let out = run(&rust(), &f.sandbox, &full, &RunOptions::new());
             out.assert_code(2);
             assert_eq!(out.stdout, "", "{args:?}");
             assert!(
@@ -2320,7 +2320,7 @@ mod contract {
                 "{args:?}: {}",
                 out.stderr
             );
-            assert_eq!(server.request_count(), 0, "{args:?}");
+            assert_eq!(f.server.request_count(), 0, "{args:?}");
         }
     }
 
