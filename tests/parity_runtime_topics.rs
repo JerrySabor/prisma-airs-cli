@@ -14,7 +14,7 @@
 //! by retry timing.
 
 use airs_test_harness::{
-    Cli, FixtureServer, PtyRun, RecordedRequest, Route, Run, RunOptions, Sandbox,
+    Cli, FixtureServer, Planned, PtyRun, RecordedRequest, Route, Run, RunOptions, Sandbox,
     assert_json_semantic_eq, fixtures, require_ts, run, spawn_pty, spawn_pty_all,
     split_outcome_lines, usage_line,
 };
@@ -290,7 +290,9 @@ mod parity {
                 rust.run.stdout,
                 format!("  Applied  other\n  Profile  alpha\n  Intent   {intent}\n")
             );
-            assert_eq!(ts.bases(Route::ProfileUpdate), ["/ts-env"]);
+            // 7.3.0 builds the client from the tenant and ignores `PANW_MGMT_ENDPOINT`
+            // (D93 narrowed in 8.0).
+            assert_eq!(ts.bases(Route::ProfileUpdate), [""]);
         }
     }
 
@@ -462,33 +464,36 @@ mod parity {
 mod divergence {
     use super::*;
 
-    /// D93: TypeScript `apply` and `revert` send their data requests to the trap (no
-    /// `PANW_MGMT_ENDPOINT`), never the tenant's endpoint; airs-cli-rs uses the tenant's.
+    /// D93 (narrowed in 8.0): TypeScript 7.3.0 `apply` and `revert` build their client
+    /// from the tenant (`managementClientOptions`), as airs-cli-rs does; only `topics
+    /// create` still ignores the tenant's endpoint (`d93_topics_create_uses_the_tenant_endpoint`).
     #[test]
-    fn d93_apply_and_revert_use_the_tenant_endpoint() {
+    fn apply_and_revert_use_the_tenant_endpoint() {
+        let seed = |server: &FixtureServer, _: &Sandbox| {
+            server.set_profiles(
+                TSG,
+                vec![guarded(
+                    1,
+                    "alpha",
+                    "allow",
+                    json!([{"action": "block", "topic": [other_ref()]}]),
+                )],
+            );
+        };
         for args in [
-            apply("alpha", "other", &[]),
+            apply("alpha", "fin", &[]),
             revert("alpha", "other", &["--force"]),
         ] {
-            let Some((rust, trapped)) = both("d93_apply_revert", setup(&no_seed), &args) else {
+            let Some((rust, ts)) = both("apply_revert_endpoint", setup(&seed), &args) else {
                 return;
             };
-            rust.run.assert_success();
-            assert_eq!(rust.bases(Route::Topics), [""]);
-            assert!(rust.count(Route::TsEnvTrap) == 0);
-            trapped.run.assert_code(1);
-            assert_eq!(
-                trapped.count(Route::TsEnvTrap),
-                1,
-                "the data request hit the trap"
-            );
-            assert_eq!(
-                trapped.count(Route::Topics),
-                0,
-                "never the tenant's endpoint"
-            );
-            assert_eq!(trapped.bases(Route::Token), [""]);
-            assert!(trapped.writes().is_empty());
+            for side in [&rust, &ts] {
+                side.run.assert_success();
+                let bases = side.bases(Route::Topics);
+                assert!(!bases.is_empty() && bases.iter().all(|base| base.is_empty()));
+                assert_eq!(side.count(Route::TsEnvTrap), 0);
+                assert!(!side.writes().is_empty());
+            }
         }
     }
 
@@ -504,18 +509,29 @@ mod divergence {
             ts.run.stdout.starts_with("  Applied  other\n"),
             "TS prints pretty"
         );
+        let referencing = |server: &FixtureServer, _: &Sandbox| {
+            server.set_profiles(
+                TSG,
+                vec![guarded(
+                    1,
+                    "alpha",
+                    "allow",
+                    json!([{"action": "block", "topic": [other_ref()]}]),
+                )],
+            );
+        };
         let args = revert("alpha", "other", &["--force", "--output", "json"]);
-        let Some((rust, ts)) = both("d94_revert", family_b(&no_seed), &args) else {
+        let Some((rust, ts)) = both("d94_revert", family_b(&referencing), &args) else {
             return;
         };
         assert_eq!(
             rust.run.json(),
             json!({"profileName": "alpha", "deleted": [id(13)]})
         );
-        ts.run.assert_code(1);
-        assert_eq!(
-            ts.run.stdout, "",
-            "TypeScript's revert never reaches its output (D99)"
+        ts.run.assert_success();
+        assert!(
+            ts.run.stdout.starts_with("  Reverted  other\n"),
+            "TS prints pretty"
         );
         let Some((rust, ts)) = both("d94_eval", setup(&eval_seed), &eval(&["--output", "json"]))
         else {
@@ -542,8 +558,8 @@ mod divergence {
         );
     }
 
-    /// D96: `apply` writes the highest profile revision and pins the highest topic
-    /// revision; TypeScript takes the first listed of each.
+    /// D96: `apply` pins the highest topic revision; TypeScript pins the first listed.
+    /// Both write the highest profile revision (7.3.0 matches the profile half).
     #[test]
     fn d96_apply_targets_the_highest_revisions() {
         let seed = |server: &FixtureServer, _: &Sandbox| {
@@ -566,7 +582,8 @@ mod divergence {
         );
         assert_eq!(
             ts.write_summary()[0].0,
-            format!("PUT /aisec/v1/mgmt/profile/uuid/{}", id(2))
+            format!("PUT /aisec/v1/mgmt/profile/uuid/{}", id(4)),
+            "7.3.0 picks the highest profile revision"
         );
         let pinned =
             |side: &Side| side.guardrails(0)[0]["topic-list"][0]["topic"][0]["topic_id"].clone();
@@ -612,7 +629,8 @@ mod divergence {
         assert_eq!(rust.run.stdout, split_outcome_lines(&ts.run.stdout).1);
     }
 
-    /// D98: another topic's ref keeps its pin and keys; TypeScript re-pins and rebuilds.
+    /// D98: another topic's ref keeps its pin; TypeScript re-pins it to the topic's
+    /// current revision (7.3.0 keeps its other keys).
     #[test]
     fn d98_other_refs_are_kept_as_read() {
         let seed =
@@ -636,13 +654,16 @@ mod divergence {
         );
         assert_eq!(
             first(&ts),
-            json!({"topic_id": id(11), "topic_name": "fin", "revision": 1}),
-            "TypeScript re-pins to the current revision and drops other keys"
+            json!({"topic_id": id(11), "topic_name": "fin", "revision": 1, "x-ref": "kept"}),
+            "TypeScript re-pins to the current revision and keeps other keys"
         );
     }
 
-    /// D99: TypeScript writes the profile and then always fails before deleting; it
-    /// leaves an empty `block` guardrail and writes a profile that never had the topic.
+    /// D99: both write the profile and then send a plain delete (7.3.0), and both refuse a
+    /// profile that does not reference the topic (exit 2, nothing written). TypeScript
+    /// leaves an empty `block` guardrail when the last ref goes, and a 409 on the delete
+    /// fails it after the PUT; airs-cli-rs removes the item and keeps the topic with a
+    /// warning (exit 0).
     #[test]
     fn d99_revert_completes() {
         let seed = |server: &FixtureServer, _: &Sandbox| {
@@ -660,50 +681,61 @@ mod divergence {
         let Some((rust, ts)) = both("d99", family_b(&seed), &args) else {
             return;
         };
-        rust.run.assert_success();
-        assert_eq!(
-            rust.write_summary()
+        let lines = |side: &Side| {
+            side.write_summary()
                 .iter()
                 .map(|(line, _)| line.clone())
-                .collect::<Vec<_>>(),
-            [
-                format!("PUT /aisec/v1/mgmt/profile/uuid/{}", id(1)),
-                format!("DELETE /aisec/v1/mgmt/topic/{}", id(13)),
-            ]
-        );
+                .collect::<Vec<_>>()
+        };
+        let expected = [
+            format!("PUT /aisec/v1/mgmt/profile/uuid/{}", id(1)),
+            format!("DELETE /aisec/v1/mgmt/topic/{}", id(13)),
+        ];
+        rust.run.assert_success();
+        ts.run.assert_success();
+        assert_eq!(lines(&rust), expected);
+        assert_eq!(lines(&ts), expected, "7.3.0 sends a plain delete");
         assert_eq!(
             rust.guardrails(0),
             json!([]),
             "the guardrail item goes with its last ref"
         );
-        assert!(!rust.topics.iter().any(|t| t["topic_id"] == id(13)));
-        ts.run.assert_code(1);
-        assert_eq!(
-            ts.run.error_line().as_deref(),
-            Some("AISEC_USER_REQUEST_PAYLOAD_ERROR:updatedBy is required")
-        );
-        assert_eq!(ts.writes().len(), 1, "the profile was written");
         assert_eq!(
             ts.guardrails(0),
             json!([{"name": "topic-guardrails", "action": "block", "topic-list": [], "options": []}]),
             "an empty block guardrail"
         );
-        assert!(
-            ts.topics.iter().any(|t| t["topic_id"] == id(13)),
-            "TS kept the topic"
-        );
-        // A profile that never referenced the topic.
-        let args = revert("alpha", "other", &["--force"]);
-        let Some((rust, ts)) = both("d99_unreferenced", family_b(&no_seed), &args) else {
+        for side in [&rust, &ts] {
+            assert!(!side.topics.iter().any(|t| t["topic_id"] == id(13)));
+        }
+        // A 409 on the delete (the topic is still referenced elsewhere).
+        let conflict = |server: &FixtureServer, sandbox: &Sandbox| {
+            seed(server, sandbox);
+            server.push_once(
+                Route::TopicDelete,
+                Planned::json(409, &json!({"message": "referenced"})),
+            );
+        };
+        let Some((rust, ts)) = both("d99_conflict", family_b(&conflict), &args) else {
             return;
         };
         rust.run.assert_success();
-        assert_eq!(rust.count(Route::ProfileUpdate), 0);
+        assert!(rust.run.stderr.contains("so it was kept"));
+        ts.run.assert_code(1);
+        assert_eq!(ts.count(Route::ProfileUpdate), 1, "after the PUT");
+        // A profile that never referenced the topic: both refuse, nothing written.
+        let Some((rust, ts)) = both("d99_unreferenced", family_b(&no_seed), &args) else {
+            return;
+        };
+        for side in [&rust, &ts] {
+            side.run.assert_code(2);
+            assert!(side.writes().is_empty());
+        }
         assert_eq!(
-            ts.count(Route::ProfileUpdate),
-            1,
-            "TypeScript writes a guardrail section"
+            usage_line(&rust.run.stderr).as_deref(),
+            Some("Topic \"other\" is not assigned to the selected protection section")
         );
+        assert_eq!(usage_line(&rust.run.stderr), usage_line(&ts.run.stderr));
     }
 
     fn visible(out: &PtyRun) -> String {

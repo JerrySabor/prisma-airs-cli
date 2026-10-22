@@ -27,6 +27,7 @@ const sidebars: SidebarsConfig = {
         'commands/tenant',
         'commands/doctor',
         'commands/runtime',
+        'commands/runtime-directional-profiles',
         'commands/runtime-dlp',
         'commands/redteam',
         'commands/model-security',

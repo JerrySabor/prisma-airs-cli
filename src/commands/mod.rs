@@ -343,6 +343,15 @@ pub fn walk_options() -> Result<scm::RequestOptions, CliError> {
     })
 }
 
+/// [`walk_options`] without the SDK's response defaults: the one shared deadline of a
+/// profile read (a page, a walk or a lookup) and of its token request (§15.25 "Response
+/// defaults"). Only `SecurityProfileListResponse.ai_profiles: []` is reachable today, and
+/// an absent list already reads as empty, so nothing printed changes; a profile record
+/// never gains a key the server did not send.
+pub fn profile_walk_options() -> Result<scm::RequestOptions, CliError> {
+    walk_options().map(scm::RequestOptions::without_response_defaults)
+}
+
 /// A fully validated invocation.
 pub enum Plan {
     /// A command group without a subcommand: its help on stderr, exit 2.
@@ -644,12 +653,14 @@ pub fn plan(cli: &Cli) -> Result<Plan, CliError> {
                     let format = output::validate_explicit(explicit)?;
                     Plan::ProfilesGet(pagination::parse_get(&args.lookup)?, format)
                 }
+                // 7.3.0 resolves these two like reads: the tenant's `defaultOutput` applies
+                // (§13.17).
                 Some(ProfilesCommand::Create(args)) => {
-                    let format = runtime_write_format(cli)?;
+                    let format = output::validate_explicit(explicit)?;
                     Plan::ProfilesCreate(Box::new(profile_write::plan_create(args, format)?))
                 }
                 Some(ProfilesCommand::Update(args)) => {
-                    let format = runtime_write_format(cli)?;
+                    let format = output::validate_explicit(explicit)?;
                     Plan::ProfilesUpdate(Box::new(profile_write::plan_update(args, format)?))
                 }
                 Some(ProfilesCommand::Delete(args)) => {
@@ -1137,5 +1148,87 @@ mod tests {
             ]),
             Ok(Plan::Scan(_, Format::Table))
         ));
+    }
+
+    /// The call-site half of §15.25 point 4, which no output can show while no profile
+    /// default is reachable: in the profile commands no profile read or write passes
+    /// `None` or the defaulted `walk_options()` (deletes keep `None`, their answers unused;
+    /// `topics apply|revert` keep `walk_options()` for the topic walk only). A line-based
+    /// heuristic over the four profile command files: a call whose `None` rustfmt moved to
+    /// its own line, or another module (backup, restore and report build their options
+    /// through `runtime::options`), is left to review.
+    #[test]
+    fn profile_call_sites_use_the_no_default_options() {
+        const CALLS: [&str; 6] = [
+            ".list(",
+            ".list_all(",
+            ".get(",
+            ".get_by_name(",
+            ".create(",
+            ".update(",
+        ];
+        let bare = |text: &str| {
+            text.matches("walk_options()").count() - text.matches("profile_walk_options()").count()
+        };
+        for (file, text) in [
+            ("profiles.rs", include_str!("profiles.rs")),
+            ("profile_write.rs", include_str!("profile_write.rs")),
+            ("topic_assign.rs", include_str!("topic_assign.rs")),
+            ("profile_cleanup.rs", include_str!("profile_cleanup.rs")),
+        ] {
+            for line in text.lines() {
+                let call = CALLS.iter().any(|call| line.contains(call));
+                assert!(!(call && line.contains("None)")), "{file}: {line}");
+            }
+            let expected = match file {
+                // The topic walks of apply and revert.
+                "topic_assign.rs" => 2,
+                // The token of the run; each listing builds its own no-default deadline.
+                "profile_cleanup.rs" => 1,
+                _ => 0,
+            };
+            assert_eq!(bare(text), expected, "{file}: a defaulted walk_options()");
+        }
+        assert_eq!(
+            include_str!("topic_assign.rs")
+                .matches("profile_walk_options()?")
+                .count(),
+            2,
+            "the profile reads of apply and revert"
+        );
+    }
+
+    /// scm-sdk 0.2.4 (DESIGN §15.25 "Response defaults"): every profile read and every
+    /// profile write runs without the SDK's response defaults;
+    /// topic walks keep them (G27, TypeScript's `examples: []`). The SDK half: the option
+    /// is what keeps an absent `ai_profiles` absent, and no default is reachable from a
+    /// profile record, so a directional record reads the same in both modes.
+    #[test]
+    fn profile_reads_and_writes_skip_the_response_defaults() {
+        use scm::airs::management::models::{SecurityProfile, SecurityProfileListResponse};
+        use scm::validation::Mode;
+        assert!(!profile_walk_options().unwrap().response_defaults());
+        assert!(walk_options().unwrap().response_defaults());
+        assert!(
+            !crate::runtime::request_options(crate::clients::SINGLE_REQUEST_BUDGET)
+                .unwrap()
+                .response_defaults()
+        );
+        let empty = serde_json::json!({});
+        let defaulted = SecurityProfileListResponse::parse(empty.clone(), Mode::Response).unwrap();
+        let sent =
+            SecurityProfileListResponse::parse(empty, Mode::ResponseWithoutDefaults).unwrap();
+        assert!(!defaulted.ai_profiles.is_unset());
+        assert!(sent.ai_profiles.is_unset());
+        let mut record = airs_test_harness::fixtures::runtime::directional_profile();
+        record["policy"]["ai-security-profiles"][0]["content-type-configurations"]["audio"] =
+            serde_json::json!({"future": null});
+        record["policy"]["ai-security-profiles"][0]["model-configuration"]["enable-full-conversation-inspection"] =
+            serde_json::Value::Null;
+        record["extra_top_level"] = serde_json::json!("kept");
+        for mode in [Mode::Response, Mode::ResponseWithoutDefaults] {
+            let parsed = SecurityProfile::parse(record.clone(), mode).unwrap();
+            assert_eq!(serde_json::to_value(&parsed).unwrap(), record, "{mode:?}");
+        }
     }
 }

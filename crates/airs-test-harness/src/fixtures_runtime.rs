@@ -287,3 +287,18 @@ pub fn scan_content(tsg: &str, scan: &str, sub_request: u64) -> Value {
         "scan_contents": {"prompt": prompt_content(tsg), "response": response_content(tsg)},
     })
 }
+
+/// The TypeScript 7.3.0 directional security profile (DESIGN §13.17), copied verbatim from
+/// `tests/fixtures/directional-security-profile.json` at tag `v7.3.0` (blob `a2294232`):
+/// one `per_content_type` entry with all four directions, shared settings (an explicit
+/// `false` conversation inspection), detector severities, a sanitized `dlp_tenant_id`,
+/// `profile_id` `550e8400-e29b-41d4-a716-446655440000`, `profile_name`
+/// `Directionality Test`, TSG `100`.
+pub const DIRECTIONAL_PROFILE_JSON: &str =
+    include_str!("../data/directional-security-profile.json");
+
+/// [`DIRECTIONAL_PROFILE_JSON`] as a value (a `POST /v1/mgmt/profile` body that is also a
+/// valid profile record).
+pub fn directional_profile() -> Value {
+    serde_json::from_str(DIRECTIONAL_PROFILE_JSON).expect("the directional fixture is JSON")
+}

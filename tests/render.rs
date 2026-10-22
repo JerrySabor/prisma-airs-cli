@@ -744,7 +744,7 @@ mod profiles {
             ],
         );
         let detail = format!(
-            "{BANNER}\n  Profile Detail:\n\n  ID        {}\n  Name      alpha\n  Status    active\n  Revision  2\n  Created   creator@example.com\n  Updated   updater@example.com\n  Modified  2026-02-01T00:00:00Z\n  Policy    {{\n    \"ai-security-profiles\": [\n      {{\n        \"model-type\": \"default\",\n        \"model-configuration\": {{\n          \"mask-data-in-storage\": false\n        }}\n      }}\n    ],\n    \"dlp-data-profiles\": []\n  }}\n\n",
+            "{BANNER}\n  Profile Detail:\n\n  ID                    {}\n  Name                  alpha\n  Status                active\n  Revision              2\n  Created               creator@example.com\n  Updated               updater@example.com\n  Modified              2026-02-01T00:00:00Z\n  Protection locations  AI[0] default / legacy\n  Policy                {{\n    \"ai-security-profiles\": [\n      {{\n        \"model-type\": \"default\",\n        \"model-configuration\": {{\n          \"mask-data-in-storage\": false\n        }}\n      }}\n    ],\n    \"dlp-data-profiles\": []\n  }}\n\n",
             fixtures::uuid(2)
         );
         assert_out(

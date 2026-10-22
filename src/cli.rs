@@ -2172,6 +2172,16 @@ pub struct TopicApplyArgs {
         allow_hyphen_values = true
     )]
     pub intent: String,
+    /// Protection direction: prompt, response, tool-call, tool-response
+    #[arg(long, value_name = "direction", allow_hyphen_values = true)]
+    pub direction: Option<String>,
+    /// AI profile entry index (zero-based)
+    #[arg(
+        long = "ai-profile-index",
+        value_name = "n",
+        allow_hyphen_values = true
+    )]
+    pub ai_profile_index: Option<String>,
     /// Deprecated alias of --output (hidden; DESIGN §13.1)
     #[arg(long, value_name = "format", hide = true, allow_hyphen_values = true)]
     pub format: Option<String>,
@@ -2189,6 +2199,16 @@ pub struct TopicRevertArgs {
     /// Skip confirmation prompt
     #[arg(long)]
     pub force: bool,
+    /// Protection direction: prompt, response, tool-call, tool-response
+    #[arg(long, value_name = "direction", allow_hyphen_values = true)]
+    pub direction: Option<String>,
+    /// AI profile entry index (zero-based)
+    #[arg(
+        long = "ai-profile-index",
+        value_name = "n",
+        allow_hyphen_values = true
+    )]
+    pub ai_profile_index: Option<String>,
     /// Deprecated alias of --output (hidden; DESIGN §13.1)
     #[arg(long, value_name = "format", hide = true, allow_hyphen_values = true)]
     pub format: Option<String>,
@@ -2346,8 +2366,11 @@ pub struct PolicyFlags {
     #[arg(long = "dlp-profiles", value_name = "list", allow_hyphen_values = true)]
     pub dlp_profiles: Option<String>,
     /// Mask detected data inline
-    #[arg(long = "mask-data-inline")]
+    #[arg(long = "mask-data-inline", overrides_with = "no_mask_data_inline")]
     pub mask_data_inline: bool,
+    /// Disable inline masking
+    #[arg(long = "no-mask-data-inline", overrides_with = "mask_data_inline")]
+    pub no_mask_data_inline: bool,
     /// Database create action (block/allow/alert)
     #[arg(
         long = "db-security-create",
@@ -2391,27 +2414,51 @@ pub struct PolicyFlags {
     )]
     pub max_inline_latency: Option<String>,
     /// Mask data in storage
-    #[arg(long = "mask-data-in-storage")]
+    #[arg(
+        long = "mask-data-in-storage",
+        overrides_with = "no_mask_data_in_storage"
+    )]
     pub mask_data_in_storage: bool,
+    /// Disable storage masking
+    #[arg(
+        long = "no-mask-data-in-storage",
+        overrides_with = "mask_data_in_storage"
+    )]
+    pub no_mask_data_in_storage: bool,
+    /// Enable shared conversation inspection
+    #[arg(
+        long = "enable-full-conversation-inspection",
+        overrides_with = "no_enable_full_conversation_inspection"
+    )]
+    pub enable_full_conversation_inspection: bool,
+    /// Disable shared conversation inspection
+    #[arg(
+        long = "no-enable-full-conversation-inspection",
+        overrides_with = "enable_full_conversation_inspection"
+    )]
+    pub no_enable_full_conversation_inspection: bool,
 }
 
-/// `runtime profiles create` (DESIGN §13.12).
+/// `runtime profiles create` (DESIGN §13.12, §13.17).
 #[derive(Args, Clone)]
 pub struct ProfileCreateArgs {
-    /// Profile name
-    #[arg(long, value_name = "name", required = true, allow_hyphen_values = true)]
-    pub name: String,
+    /// Profile name (required unless --config is supplied)
+    #[arg(long, value_name = "name", allow_hyphen_values = true)]
+    pub name: Option<String>,
     /// Create profile as inactive
     #[arg(long = "no-active")]
     pub no_active: bool,
     #[command(flatten)]
     pub policy: PolicyFlags,
-    /// JSON file with profile configuration (legacy)
+    /// Protection direction: prompt, response, tool-call, tool-response
+    #[arg(long, value_name = "direction", allow_hyphen_values = true)]
+    pub direction: Option<String>,
+    /// Complete JSON profile configuration; exclusive with write flags
     #[arg(long, value_name = "path", value_parser = clap::value_parser!(std::ffi::OsString))]
     pub config: Option<std::ffi::OsString>,
 }
 
-/// `runtime profiles update <nameOrId>` (DESIGN §13.13).
+/// `runtime profiles update <nameOrId>` (DESIGN §13.13, §13.17).
 #[derive(Args, Clone)]
 pub struct ProfileUpdateArgs {
     /// Profile name or UUID
@@ -2428,7 +2475,17 @@ pub struct ProfileUpdateArgs {
     pub no_active: bool,
     #[command(flatten)]
     pub policy: PolicyFlags,
-    /// JSON file with profile updates (legacy)
+    /// Protection direction: prompt, response, tool-call, tool-response
+    #[arg(long, value_name = "direction", allow_hyphen_values = true)]
+    pub direction: Option<String>,
+    /// Select an AI entry in a multi-entry policy (zero-based)
+    #[arg(
+        long = "ai-profile-index",
+        value_name = "n",
+        allow_hyphen_values = true
+    )]
+    pub ai_profile_index: Option<String>,
+    /// Complete JSON replacement; exclusive with write flags
     #[arg(long, value_name = "path", value_parser = clap::value_parser!(std::ffi::OsString))]
     pub config: Option<std::ffi::OsString>,
 }

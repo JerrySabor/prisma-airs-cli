@@ -11,7 +11,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use airs_test_harness::{
-    Cli, FixtureServer, NormalizedRequest, Planned, Route, Run, RunOptions, Rx, Sandbox,
+    Cli, FixtureServer, NormalizedRequest, Planned, Route, Run, RunOptions, Rx, Sandbox, fixtures,
     normalize_all, require_ts, run,
 };
 use serde_json::json;
@@ -102,7 +102,7 @@ mod parity {
     /// lines, exit codes and requests.
     #[test]
     fn the_report_matches_typescript() {
-        let scenarios: [&Edit<'_>; 4] = [
+        let scenarios: [&Edit<'_>; 5] = [
             &|_, _| {},
             &|server, _| {
                 server.set_default(
@@ -132,6 +132,22 @@ mod parity {
                             .with_retry_after(0),
                     );
                 }
+            },
+            // 8.0 (§13.17): the "Protection configurations" column of a directional
+            // profile (one row per direction, the shared settings left out), a
+            // multi-entry legacy profile and an entry without protection sections.
+            &|server, _| {
+                let mut directional = fixtures::runtime::directional_profile();
+                directional["policy"]["ai-security-profiles"][0]["content-type-configurations"]["tool-response"] =
+                    json!({"x-future": true});
+                let mut multi = fixtures::profile(2, "multi", 4);
+                multi["policy"]["ai-security-profiles"] = json!([
+                    {"model-type": "default", "model-configuration": {
+                        "model-protection": [{"name": "prompt-injection", "action": "block"}],
+                        "latency": {"inline-timeout-action": "allow"}}},
+                    {"model-configuration": {"mask-data-in-storage": true}}
+                ]);
+                server.set_profiles(TSG, vec![directional, multi]);
             },
         ];
         for (index, edit) in scenarios.iter().enumerate() {

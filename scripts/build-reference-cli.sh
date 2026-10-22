@@ -28,7 +28,7 @@ the build is already current.
 USAGE
 }
 
-PINNED_COMMIT="${AIRS_TS_COMMIT:-5711012246d325f20dbe93b710dcc697a7f18a8a}"
+PINNED_COMMIT="${AIRS_TS_COMMIT:-7a54e46eee4f7914d610bc78d2f98dd7de09fbfe}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # This repository's own Forgejo URL: the pin is a commit in its history.
 REPOSITORY_URL="ssh://git@git-ssh.cdot.io/cdot/prisma-airs-cli.git"

@@ -2332,6 +2332,70 @@ mod management_0_86 {
         }
     }
 
+    /// scm-sdk 0.2.3's `profiling_status` values (`NOT_STARTED`, `IN_PROGRESS`,
+    /// `COMPLETED`, `FAILED`) and an unknown one are accepted by the backup's list and
+    /// per-target reads; the stored create projection carries no profiling status (§15.18),
+    /// and nothing is sent as a filter. A target whose `multi_turn_config` is no known
+    /// 0.86.0 branch fails the response schema (the SDK keeps TypeScript's closed union):
+    /// it is a failed row and the run exits 1, never stored as something else.
+    #[test]
+    fn profiling_statuses_are_accepted_and_unknown_unions_fail_the_row() {
+        for status in [
+            "NOT_STARTED",
+            "IN_PROGRESS",
+            "COMPLETED",
+            "FAILED",
+            "FUTURE_STATE",
+        ] {
+            let f = fx();
+            f.server.redteam(|data| {
+                let mut target = fx::rest_target(1, "Profiled");
+                target["profiling_status"] = json!(status);
+                data.targets = vec![target];
+            });
+            let dir = f.sandbox.tmp().join("b");
+            std::fs::create_dir_all(&dir).unwrap();
+            let dir_text = dir.display().to_string();
+            let out = f.rt(&["targets", "backup", "--output-dir", &dir_text]);
+            out.assert_success();
+            let doc = read_json(&backup_file(&dir));
+            assert_eq!(doc["failed"], json!([]), "{status}");
+            let stored = &doc["targets"][0]["target"];
+            assert_eq!(stored["name"], "Profiled", "{status}");
+            assert!(stored.get("profiling_status").is_none(), "{status}");
+            let lists: Vec<String> = f
+                .api()
+                .into_iter()
+                .filter(|line| line.starts_with("GET /redteam/mgmt/v1/target?"))
+                .collect();
+            assert_eq!(
+                lists,
+                ["GET /redteam/mgmt/v1/target?skip=0&limit=100"],
+                "{status}"
+            );
+        }
+        let f = fx();
+        f.server.redteam(|data| {
+            let mut odd = fx::rest_target(1, "Future Session");
+            odd["connection_params"]["multi_turn_config"] = json!({"type": "future_session"});
+            data.targets = vec![odd, fx::rest_target(2, "Plain")];
+        });
+        let dir = f.sandbox.tmp().join("b");
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir_text = dir.display().to_string();
+        let out = f.rt(&["targets", "backup", "--output-dir", &dir_text]);
+        out.assert_code(1);
+        let doc = read_json(&backup_file(&dir));
+        assert_eq!(doc["failed"][0]["uuid"], fx::target_id(1), "{doc}");
+        let names: Vec<&Value> = doc["targets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| &entry["target"]["name"])
+            .collect();
+        assert_eq!(names, [&json!("Plain")]);
+    }
+
     /// D329 (backup): a target whose answer carries only a 0.86.0 vocabulary value
     /// (`N8N`, `REALTIME`, or `VERTEX_AI` without a Vertex AI config) is read by both SDKs,
     /// but 0.11's create schema refused its projection, so 0.11 recorded the failed row

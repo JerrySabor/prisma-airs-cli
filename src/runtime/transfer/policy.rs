@@ -21,7 +21,10 @@ pub struct Comparison {
 
 /// `compareRuntimePolicies(expected, actual)`; `None` is `undefined`.
 pub fn compare(expected: Option<&Value>, actual: Option<&Value>) -> Comparison {
-    let mut walk = Walk::default();
+    let mut walk = Walk {
+        expected,
+        ..Walk::default()
+    };
     walk.visit(expected, actual, "policy", false, false);
     Comparison {
         matches: walk.differences.is_empty(),
@@ -78,6 +81,15 @@ fn relative(path: &str) -> String {
     }
 }
 
+/// The index of the AI entry a path lies under (`policy.ai-security-profiles[<i>]…`).
+fn entry_index(path: &str) -> Option<usize> {
+    let rest = path.strip_prefix("policy.ai-security-profiles[")?;
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    (digits > 0 && rest[digits..].starts_with(']'))
+        .then(|| rest[..digits].parse().ok())
+        .flatten()
+}
+
 /// `value.name` of an object as a string.
 fn field<'a>(object: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
     object.get(key)
@@ -88,12 +100,29 @@ fn text<'a>(object: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
 }
 
 #[derive(Default)]
-struct Walk {
+struct Walk<'a> {
+    /// The requested policy: its entries decide which paths get the legacy allowances.
+    expected: Option<&'a Value>,
     server_defaults: Vec<String>,
     differences: Vec<String>,
 }
 
-impl Walk {
+impl Walk<'_> {
+    /// TS 7.3.0: the server-default allowances are relative to a **legacy** entry's
+    /// `model-configuration` only. Under a directional entry (§13.17) every path stays
+    /// absolute, so no allowance matches and directions compare strictly.
+    fn allowance_path(&self, path: &str) -> String {
+        let legacy = entry_index(path)
+            .and_then(|index| self.expected?.get("ai-security-profiles")?.get(index))
+            .and_then(Value::as_object)
+            .is_some_and(|entry| !crate::profile_policy::is_directional(entry));
+        if legacy {
+            relative(path)
+        } else {
+            path.to_owned()
+        }
+    }
+
     fn visit(
         &mut self,
         source: Option<&Value>,
@@ -193,7 +222,7 @@ impl Walk {
         toxic: bool,
         topics: bool,
     ) -> bool {
-        let relative = relative(path);
+        let relative = self.allowance_path(path);
         let source_name = text(source, "name");
         let same_name = strict_eq(field(source, "name"), field(target, "name"));
         let mut allowed: Option<Value> = None;
@@ -631,6 +660,50 @@ mod tests {
         assert!(cmp(&source, &target).matches);
         assert!(!cmp(&target, &source).matches);
         assert!(!cmp(&source, &fixture().1).matches);
+    }
+
+    /// TS 7.3.0 `compares directions strictly without extending legacy server-default
+    /// allowances` (§13.17).
+    #[test]
+    fn directional_entries_compare_strictly() {
+        let base = || airs_test_harness::fixtures::runtime::directional_profile()["policy"].clone();
+        fn directions(policy: &mut Value) -> &mut Value {
+            &mut policy["ai-security-profiles"][0]["content-type-configurations"]
+        }
+        assert!(cmp(&base(), &base()).matches);
+        let mut changed = base();
+        directions(&mut changed)["response"]["model-protection"][0]["action"] = json!("allow");
+        assert!(!cmp(&base(), &changed).matches);
+        let mut missing = base();
+        directions(&mut missing)
+            .as_object_mut()
+            .unwrap()
+            .remove("tool-call");
+        assert!(!cmp(&base(), &missing).matches);
+        let mut omitted = base();
+        directions(&mut omitted)["prompt"]["model-protection"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("severity");
+        let comparison = cmp(&omitted, &base());
+        assert!(!comparison.matches);
+        assert!(
+            comparison.server_defaults.is_empty(),
+            "no legacy allowance inside a direction"
+        );
+        let mut unknown = base();
+        directions(&mut unknown)["response"]["future"] = json!(false);
+        assert!(!cmp(&base(), &unknown).matches);
+        // The same added `null` that a legacy entry allows is a difference in a direction.
+        let mut dropped = base();
+        directions(&mut dropped)["prompt"]["data-protection"]
+            .as_object_mut()
+            .unwrap()
+            .remove("database-security");
+        assert!(!cmp(&dropped, &base()).matches);
+        assert_eq!(entry_index("policy.ai-security-profiles[12].x"), Some(12));
+        assert_eq!(entry_index("policy.ai-security-profiles[].x"), None);
+        assert_eq!(entry_index("policy.other"), None);
     }
 
     #[test]

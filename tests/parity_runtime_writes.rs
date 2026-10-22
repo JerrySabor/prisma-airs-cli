@@ -179,6 +179,30 @@ fn assert_write_parity(rust: &Side, ts: &Side) {
     assert_json_semantic_eq(&json!(rust.profiles), &json!(ts.profiles));
 }
 
+/// The parity contract of a `profiles create|update` (8.0, TS 7.3.0): its outcome is a
+/// status line on stderr on both CLIs (`Profile created|updated: <id>`), so stdout and
+/// stderr compare byte for byte, then the writes and the resulting state.
+fn assert_profile_write_parity(rust: &Side, ts: &Side) {
+    assert_eq!(rust.run.code, ts.run.code, "{:?}\n{:?}", rust.run, ts.run);
+    assert_eq!(rust.run.stderr, ts.run.stderr, "status line");
+    assert_eq!(rust.run.stdout, ts.run.stdout, "data");
+    let (rust_writes, ts_writes) = (rust.write_summary(), ts.write_summary());
+    assert_eq!(
+        rust_writes.len(),
+        ts_writes.len(),
+        "{rust_writes:?}\n{ts_writes:?}"
+    );
+    for ((rust_line, rust_body), (ts_line, ts_body)) in rust_writes.iter().zip(&ts_writes) {
+        assert_eq!(rust_line, ts_line);
+        match (rust_body, ts_body) {
+            (Some(rust_body), Some(ts_body)) => assert_json_semantic_eq(rust_body, ts_body),
+            (rust_body, ts_body) => assert_eq!(rust_body, ts_body),
+        }
+    }
+    assert_json_semantic_eq(&json!(rust.topics), &json!(ts.topics));
+    assert_json_semantic_eq(&json!(rust.profiles), &json!(ts.profiles));
+}
+
 fn create_topic<'a>(name: &'a str, extra: &[&'a str]) -> Vec<&'a str> {
     let mut args = vec![
         "runtime",
@@ -289,11 +313,13 @@ mod parity {
         let Some((rust, ts)) = both("profiles_create_flags", setup(&no_seed), &args) else {
             return;
         };
-        assert_write_parity(&rust, &ts);
+        assert_profile_write_parity(&rust, &ts);
     }
 
+    /// The file names the profile; `--name` is not given (TS 7.3.0 refuses it beside
+    /// `--config`, as airs-cli-rs does).
     #[test]
-    fn profiles_create_from_a_matching_config_file() {
+    fn profiles_create_from_a_config_file() {
         let seed = |_: &FixtureServer, sandbox: &Sandbox| {
             std::fs::write(
                 sandbox.tmp().join("p.json"),
@@ -301,6 +327,11 @@ mod parity {
             )
             .unwrap();
         };
+        let args = ["runtime", "profiles", "create", "--config", "TMP/p.json"];
+        let Some((rust, ts)) = both("profiles_create_config", setup(&seed), &args) else {
+            return;
+        };
+        assert_profile_write_parity(&rust, &ts);
         let args = [
             "runtime",
             "profiles",
@@ -310,10 +341,14 @@ mod parity {
             "--config",
             "TMP/p.json",
         ];
-        let Some((rust, ts)) = both("profiles_create_config", setup(&seed), &args) else {
+        let Some((rust, ts)) = both("profiles_create_config_name", setup(&seed), &args) else {
             return;
         };
-        assert_write_parity(&rust, &ts);
+        for side in [&rust, &ts] {
+            side.run.assert_code(2);
+            assert!(side.requests.is_empty());
+        }
+        assert_eq!(rust.run.stderr, ts.run.stderr);
     }
 
     #[test]
@@ -329,13 +364,55 @@ mod parity {
             "alert",
             "--db-security-delete",
             "block",
+            "--malicious-code",
+            "block",
             "--name",
             "alpha2",
         ];
         let Some((rust, ts)) = both("profiles_update_merge", setup(&no_seed), &args) else {
             return;
         };
-        assert_write_parity(&rust, &ts);
+        assert_profile_write_parity(&rust, &ts);
+        assert_eq!(
+            rust.write_summary()[0].1.as_ref().unwrap()["policy"]["ai-security-profiles"][0]["model-configuration"]
+                ["app-protection"]["malicious-code-protection"],
+            json!({"action": "block", "name": "malicious-code"}),
+            "the update merge names a new item `malicious-code` (TS 7.3.0)"
+        );
+    }
+
+    /// TS 7.3.0: `--[no-]mask-data-inline` and `--dlp-profiles` change only their fields
+    /// on update, without `--dlp-action`; explicit `false` is kept.
+    #[test]
+    fn masking_changes_alone_without_a_dlp_action() {
+        let seed = |server: &FixtureServer, _: &Sandbox| {
+            let mut alpha = fixtures::profile(1, "alpha", 1);
+            alpha["policy"]["ai-security-profiles"][0]["model-configuration"]["data-protection"] = json!({
+                "data-leak-detection": {"action": "alert", "member": [{"text": "PII"}], "mask-data-inline": true}
+            });
+            server.set_profiles(TSG, vec![alpha]);
+        };
+        let args = [
+            "runtime",
+            "profiles",
+            "update",
+            "alpha",
+            "--no-mask-data-inline",
+            "--dlp-profiles",
+            "PCI",
+            "--no-mask-data-in-storage",
+        ];
+        let Some((rust, ts)) = both("profiles_update_masking", setup(&seed), &args) else {
+            return;
+        };
+        assert_profile_write_parity(&rust, &ts);
+        let config = &rust.write_summary()[0].1.clone().unwrap()["policy"]["ai-security-profiles"]
+            [0]["model-configuration"];
+        assert_eq!(
+            config["data-protection"]["data-leak-detection"],
+            json!({"action": "alert", "member": [{"text": "PCI"}], "mask-data-inline": false})
+        );
+        assert_eq!(config["mask-data-in-storage"], false);
     }
 
     #[test]
@@ -404,7 +481,7 @@ mod parity {
         let Some((rust, ts)) = both("write_401_replay", setup(&seed), &args) else {
             return;
         };
-        assert_write_parity(&rust, &ts);
+        assert_profile_write_parity(&rust, &ts);
         for side in [&rust, &ts] {
             let routes: Vec<Route> = side.requests.iter().map(|r| r.route).collect();
             assert_eq!(
@@ -582,7 +659,11 @@ mod divergence {
         };
         assert_eq!((rust.run.code, ts.run.code), (0, 0));
         assert_eq!(rust.write_summary()[0].1.as_ref().unwrap()["active"], false);
-        assert_eq!(ts.write_summary()[0].1.as_ref().unwrap()["active"], true);
+        assert_eq!(
+            ts.write_summary()[0].1.as_ref().unwrap()["active"],
+            false,
+            "7.3.0 changes active only when given"
+        );
         let args = ["runtime", "profiles", "update", "alpha"];
         let Some((rust, ts)) = both("d100_nothing", setup(&seed), &args) else {
             return;
@@ -599,7 +680,8 @@ mod divergence {
         assert!(rust.requests.is_empty());
     }
 
-    /// D101: a 409 never reports another profile as created.
+    /// D101: a 409 is an error on both CLIs (7.3.0 no longer looks the name up);
+    /// airs-cli-rs names the profile, TypeScript prints the SDK's status text.
     #[test]
     fn d101_a_conflict_is_an_error() {
         let empty = |server: &FixtureServer, _: &Sandbox| {
@@ -617,21 +699,20 @@ mod divergence {
         let Some((rust, ts)) = both("d101_empty", setup(&empty), &args) else {
             return;
         };
-        ts.run.assert_success();
-        assert!(
-            ts.run
-                .stdout
-                .contains(&format!("  ✓ Profile created: {}\n", id(1))),
-            "TypeScript reports the pre-existing profile as created"
+        assert_eq!((rust.run.code, ts.run.code), (1, 1));
+        assert_eq!(
+            ts.run.error_line().as_deref(),
+            Some("AISEC_CLIENT_SIDE_ERROR:API error 409")
         );
-        assert_eq!(ts.count(Route::Profiles), 1, "TypeScript looks the name up");
-        rust.run.assert_code(1);
         assert_eq!(
             rust.run.error_line().as_deref(),
             Some("Profile \"alpha\" already exists. Use 'profiles update' to modify it.")
         );
         assert_eq!(rust.run.http_status(), Some(409));
-        assert_eq!(rust.count(Route::Profiles), 0, "no lookup");
+        for side in [&rust, &ts] {
+            assert_eq!(side.count(Route::Profiles), 0, "no lookup");
+            assert_eq!(side.run.stdout, "");
+        }
         let message = |server: &FixtureServer, _: &Sandbox| {
             server.push_once(
                 Route::ProfileCreate,
@@ -653,24 +734,32 @@ mod divergence {
         );
     }
 
-    /// D102: flag combinations that cannot succeed, or would drop flags, are usage errors.
+    /// D102: flag combinations that cannot succeed, or would create a profile without
+    /// protections, are usage errors with fixed texts. TypeScript 7.3.0 creates an empty
+    /// policy from `--name` alone, accepts JavaScript number forms for
+    /// `--max-inline-latency`, and refuses the rest with its schema text (exit 2).
     #[test]
     fn d102_profile_flag_usage_errors() {
         for (extra, rust_message, ts_code) in [
             (
                 &[][..],
                 "Specify at least one policy flag (for example --prompt-injection block) or --config <path>",
-                1,
+                0,
+            ),
+            (
+                &["--max-inline-latency", "1e1"],
+                "--max-inline-latency must be a non-negative integer",
+                0,
             ),
             (
                 &["--max-inline-latency", "1.5"],
                 "--max-inline-latency must be a non-negative integer",
-                1,
+                2,
             ),
             (
                 &["--prompt-injection", "block", "--dlp-profiles", "PII"],
-                "--dlp-profiles and --mask-data-inline require --dlp-action",
-                0,
+                "--dlp-profiles and --[no-]mask-data-inline require --dlp-action when creating a profile",
+                2,
             ),
         ] {
             let mut args = vec!["runtime", "profiles", "create", "--name", "gamma"];
@@ -683,41 +772,32 @@ mod divergence {
             assert!(rust.requests.is_empty());
             ts.run.assert_code(ts_code);
             if ts_code == 0 {
-                let body = ts.write_summary()[0].1.clone().unwrap();
-                assert!(
-                    !body.to_string().contains("PII"),
-                    "TypeScript drops --dlp-profiles without --dlp-action"
-                );
+                assert_eq!(ts.writes().len(), 1, "TypeScript creates the profile");
             } else {
-                assert!(
-                    ts.run
-                        .error_line()
-                        .unwrap_or_default()
-                        .starts_with("AISEC_USER_REQUEST_PAYLOAD_ERROR:Request body for POST /v1/mgmt/profile did not match schema: "),
-                    "{}",
-                    ts.run.stderr
-                );
+                assert!(ts.requests.is_empty(), "refused before OAuth");
             }
         }
+        let args = ["runtime", "profiles", "create", "--name", "gamma"];
+        let Some((_, ts)) = both("d102_empty", setup(&no_seed), &args) else {
+            return;
+        };
+        assert_eq!(
+            ts.write_summary()[0].1.as_ref().unwrap()["policy"],
+            json!({}),
+            "an empty policy"
+        );
     }
 
-    /// D103: input files are read before the tenant with fixed messages, and a file's
-    /// `profile_name` must match `--name`.
+    /// D103: input files are read before the tenant with fixed messages (exit 1; TS 7.3.0
+    /// exit 2 with Node's text for a profile file), and an update file's `profile_name`
+    /// must name the resolved profile (TS renames silently).
     #[test]
     fn d103_input_files() {
-        let args = [
-            "runtime",
-            "profiles",
-            "create",
-            "--name",
-            "gamma",
-            "--config",
-            "TMP/none.json",
-        ];
+        let args = ["runtime", "profiles", "create", "--config", "TMP/none.json"];
         let Some((rust, ts)) = both("d103_missing", setup(&no_seed), &args) else {
             return;
         };
-        assert_eq!((rust.run.code, ts.run.code), (1, 1));
+        assert_eq!((rust.run.code, ts.run.code), (1, 2));
         assert_eq!(
             rust.run.error_line().as_deref(),
             Some(
@@ -725,7 +805,7 @@ mod divergence {
             )
         );
         assert_eq!(
-            ts.run.error_line().as_deref(),
+            usage_line(&ts.run.stderr).as_deref(),
             Some("ENOENT: no such file or directory, open 'TMP/none.json'")
         );
         let other = |_: &FixtureServer, sandbox: &Sandbox| {
@@ -738,9 +818,8 @@ mod divergence {
         let args = [
             "runtime",
             "profiles",
-            "create",
-            "--name",
-            "gamma",
+            "update",
+            "alpha",
             "--config",
             "TMP/p.json",
         ];
@@ -751,14 +830,16 @@ mod divergence {
         assert_eq!(
             ts.write_summary()[0].1.as_ref().unwrap()["profile_name"],
             "other",
-            "TypeScript ignores --name"
+            "TypeScript renames"
         );
         rust.run.assert_code(1);
         assert_eq!(
             rust.run.error_line().as_deref(),
-            Some("profile_name in TMP/p.json does not match --name gamma")
+            Some(
+                "profile_name in TMP/p.json differs from the profile being updated; rename with --name instead"
+            )
         );
-        assert!(rust.requests.is_empty());
+        assert!(rust.writes().is_empty());
         let array = |_: &FixtureServer, sandbox: &Sandbox| {
             std::fs::write(sandbox.tmp().join("t.json"), b"[1]").unwrap();
         };
@@ -1019,16 +1100,25 @@ mod divergence {
         ];
         let mut quiet = setup(&no_seed);
         quiet.quiet = true;
+        let Some((rust, ts)) = both("d106_quiet_profile", quiet, &args) else {
+            return;
+        };
+        assert_eq!((rust.run.code, ts.run.code), (0, 0));
+        assert_eq!(
+            (rust.run.stderr.as_str(), ts.run.stderr.as_str()),
+            ("", ""),
+            "7.3.0 prints a quiet-suppressed status line on stderr, as airs-cli-rs does"
+        );
+        let args = create_topic("gamma", &[]);
+        let mut quiet = setup(&no_seed);
+        quiet.quiet = true;
+        quiet.ts_env = true;
         let Some((rust, ts)) = both("d106_quiet", quiet, &args) else {
             return;
         };
         assert_eq!((rust.run.code, ts.run.code), (0, 0));
         assert_eq!(rust.run.stderr, "");
-        assert!(
-            ts.run
-                .stdout
-                .contains(&format!("  ✓ Profile created: {}\n", id(901)))
-        );
+        assert!(ts.run.stdout.contains("  ✓ Topic created: gamma\n"));
         let target = id(13);
         let args = [
             "runtime",
@@ -1110,8 +1200,12 @@ mod divergence {
             return;
         };
         assert_eq!((rust.run.code, ts.run.code), (1, 1));
-        assert!(ts.run.stderr.contains("    at "), "a Node stack trace");
-        assert!(!rust.run.stderr.contains("    at "));
+        for side in [&rust, &ts] {
+            assert!(
+                !side.run.stderr.contains("    at "),
+                "no stack trace (7.3.0 handles the tenant error)"
+            );
+        }
         assert!(rust.run.error_line().is_some());
         let no_id = |server: &FixtureServer, _: &Sandbox| {
             let mut alpha = fixtures::profile(1, "alpha", 1);
@@ -1171,9 +1265,10 @@ mod divergence {
         assert_eq!(error_line(&rust.run.stderr), rust.run.error_line());
     }
 
-    /// D117: `--dlp-action` changes only the action of `data-leak-detection`.
+    /// `--dlp-action` changes only the action of `data-leak-detection` on both CLIs (D117,
+    /// retired in 8.0: TS 7.3.0 merges recursively).
     #[test]
-    fn d117_dlp_action_overlay() {
+    fn dlp_action_overlay_keeps_the_dlp_profiles() {
         let seed = |server: &FixtureServer, _: &Sandbox| {
             let mut alpha = fixtures::profile(1, "alpha", 1);
             alpha["policy"]["ai-security-profiles"][0]["model-configuration"]["data-protection"] = json!({
@@ -1202,10 +1297,6 @@ mod divergence {
             leak(&rust),
             json!({"action": "block", "member": [{"text": "PII"}], "mask-data-inline": true})
         );
-        assert_eq!(
-            leak(&ts),
-            json!({"action": "block"}),
-            "TypeScript drops the DLP profiles"
-        );
+        assert_eq!(leak(&ts), leak(&rust), "7.3.0 overlays too (D117 retired)");
     }
 }

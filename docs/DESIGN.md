@@ -1,4 +1,4 @@
-# airs-cli-rs design contract (0.1 = milestones 1–3, 0.2 = M3.5, 0.3 = M4t, 0.4 = M4, 0.5 = M5, 0.6 = M6a, 0.7 = M6b, 0.8 = M6c, 0.9 = M6d, 0.9.1 = scm-sdk 0.2.2, 0.10 = M6e, 0.11 = M6f, 1.0 = rename and distribution on scm-sdk 0.2.3)
+# airs-cli-rs design contract (0.1 = milestones 1–3, 0.2 = M3.5, 0.3 = M4t, 0.4 = M4, 0.5 = M5, 0.6 = M6a, 0.7 = M6b, 0.8 = M6c, 0.9 = M6d, 0.9.1 = scm-sdk 0.2.2, 0.10 = M6e, 0.11 = M6f, 1.0 = rename and distribution on scm-sdk 0.2.3, 8.0 = the move into `cdot/prisma-airs-cli` and the TypeScript 7.3.0 port on scm-sdk 0.2.4)
 
 This document is the implementation contract for `airs-cli-rs` (the name of this Rust
 implementation and its repository; from 1.0 its executable is `airs`, with `airs-cli-rs` kept as
@@ -8,7 +8,7 @@ reimplementation of a subset of the TypeScript `airs-cli`
 `5711012`) on top of the published `scm-sdk` crate (`=0.1.1`, crates.io checksum
 `8339891e…d154`, built from scm-sdk-rs commit `7efd137`; `=0.1.0` until 0.7, see G10 in
 §15). From 0.9.1 the pin is `=0.2.2` (crates.io checksum `c908cad8…db7c`, the same features;
-G25 closed, §15.23); 0.10 keeps `=0.2.2` and adds the `gateway` feature (§19); 0.11 keeps it and adds the `agentguard` feature (§20); 1.0 moves the pin to `=0.2.3` (crates.io checksum `80a58b7b…e809`, the same features; the red team management 0.86.0 update, §15.24). From 0.3 the Rust CLI keeps its own tenant store (§3) and reads the TypeScript
+G25 closed, §15.23); 0.10 keeps `=0.2.2` and adds the `gateway` feature (§19); 0.11 keeps it and adds the `agentguard` feature (§20); 1.0 moves the pin to `=0.2.3` (crates.io checksum `80a58b7b…e809`, the same features; the red team management 0.86.0 update, §15.24). 8.0 moves the TypeScript reference to the final TypeScript release, 7.3.0 (tag `v7.3.0`, commit `7a54e46`, TS SDK 0.35.0, this repository's own history; docs/TESTING.md §3.4), ports its directional security profiles (§13.17) and the rest of 7.3.0, and adopts scm-sdk 0.2.4, the TypeScript 0.35.0 overlay (§15.25; until 0.2.4 is on crates.io, the exact Forgejo commit `4825616` as a temporary git dependency). From 0.3 the Rust CLI keeps its own tenant store (§3) and reads the TypeScript
 CLI's files only in `tenant import`, which never modifies them.
 
 The behavioural research this contract is derived from lives in `docs/research/`
@@ -165,7 +165,7 @@ error never needs a selected tenant, never causes an HTTP request and never writ
   [    <extra detail line>\n ...]
   \n
   ```
-  The `Re-run with --debug …` hint (TS text, `src/cli/renderer/common.ts:18-22`) follows
+  The `Re-run with --debug …` hint (TS text, `src/cli/renderer/common.ts:19-23`) follows
   the `HTTP <status>` line, and only that line: it appears exactly when the block has an
   `HTTP <status>` line and `--debug` is off. Under `--debug` it is omitted, because the
   notice already named the log (D69). The Rust-only detail lines (`Request ID: …`,
@@ -584,7 +584,7 @@ transport and has no record. Records appear in completion order.
 this order, TS names where TS has the field:
 
 ```json
-{"timestamp":"2026-10-17T11:03:44.500Z","durationMs":6,"operation":"airs.management.profiles.list","request":{"method":"GET","url":"https://api.apps.paloaltonetworks.com/aisec/v1/mgmt/profiles/tsg/100","headers":{"authorization":"***","service-name":"api","user-agent":"PAN-AIRS/0.2.3-rust-sdk"}},"response":{"status":200,"statusText":"OK","headers":{"content-length":"722","content-type":"application/json","date":"Sat, 17 Oct 2026 11:03:44 GMT"}}}
+{"timestamp":"2026-10-17T11:03:44.500Z","durationMs":6,"operation":"airs.management.profiles.list","request":{"method":"GET","url":"https://api.apps.paloaltonetworks.com/aisec/v1/mgmt/profiles/tsg/100","headers":{"authorization":"***","service-name":"api","user-agent":"PAN-AIRS/0.2.4-rust-sdk"}},"response":{"status":200,"statusText":"OK","headers":{"content-length":"722","content-type":"application/json","date":"Sat, 17 Oct 2026 11:03:44 GMT"}}}
 ```
 
 - `timestamp`: UTC at entry to `send`, `YYYY-MM-DDTHH:MM:SS.mmmZ` (formatted in-crate
@@ -1700,9 +1700,11 @@ already printed the banner, D57).
 ### 7.5 JSON shapes (bare array for lists, bare object for gets)
 
 Profile: `{profileId, profileName, revision, active, createdBy, updatedBy,
-lastModifiedTs, policy}` in that order, unset fields omitted, `csp_id`, `tsg_id` and
+lastModifiedTs, policy, dlpTenantId}` in that order (`dlpTenantId` from 8.0, only when the
+record carries `dlp_tenant_id`, §13.17), unset fields omitted, `csp_id`, `tsg_id` and
 unknown top-level fields dropped; `policy` is the SDK `Policy` model serialised
-(schema-ordered known keys, then unknown keys sorted).
+(schema-ordered known keys, then unknown keys sorted; extensions included). Every profile
+read is validated without the SDK's response defaults (§15.25 point 4).
 
 Topic: `{topicId, topicName, revision, active, description, examples, createdBy,
 updatedBy, lastModifiedTs, createdTs}`; `examples` is always present (`[]` when
@@ -3845,8 +3847,14 @@ src/commands/profile_write.rs (M4) profiles create, update, delete (§13.12–§
 src/commands/profile_cleanup.rs (M4) listing, selection, confirmation re-check, deletion
                        loop, result document (§13.15)
 src/policy.rs          (M4) pure serde_json::Value surgery: the profile builder and its
-                       defaults, mergeProfilePolicy with the D117 overlay, the
-                       topic-guardrails edits of §13.4; unit-tested without I/O
+                       defaults, mergeProfilePolicy, the topic-guardrails edits of §13.4;
+                       from 8.0 the TS 7.3.0 forms (directional create, the selected
+                       block's recursive merge, the selector-aware topic edits and the
+                       0.35.0 request validation, §13.17); unit-tested without I/O
+src/profile_policy.rs  (8.0) TS 7.3.0 profile-policy.ts: the legacy and directional
+                       layouts, protection locations, the --direction /
+                       --ai-profile-index selector, entry and block selection with their
+                       refusals, and the recursive detector merge (§13.17)
 src/writes.rs          (M4) one write: local body validation, the single 401 replay, the
                        outcome and detail lines of §13.2 (D95); from M6e one describe for
                        every milestone (OutcomeLines, §19 choice 140)
@@ -4426,7 +4434,7 @@ raw scan read, §20.16 choice 77).
 | D23 | doctor skip text after a config failure | `skipped — no scanner credentials configured` | `not evaluated — fix the failed checks above first` | accuracy |
 | D24 | doctor `PANW_AI_SEC_DEBUG*` / `PANW_AI_SEC_TIMEOUT_MS` | "SDK diagnostics on" | reported as ignored | the Rust SDK reads no environment |
 | D25 | doctor store-failure hint (narrowed in 0.3) | names the ignored `PRISMA_AIRS_CONFIG_PATH` (`Restore or remove <registryPath>; PRISMA_AIRS_CONFIG_PATH bypasses the registry meanwhile`) | `Fix or restore <D>/config.toml`; `Set AIRS_CLI_CONFIG_DIR or XDG_CONFIG_HOME to an absolute path` when no store directory resolves (§9) | stale hint; the Rust doctor reads the TOML store (0.1–0.2: `Restore or remove <registryPath>`) |
-| D26 | `--version` | `7.2.1-forgejo.0` | `1.0.0` from 1.0 (same bare format; the same under `airs` and `airs-cli-rs`, §21.2) | separate product version |
+| D26 | `--version` | `7.3.0` from 8.0 (the reference, §1; `7.2.1-forgejo.0` before) | `1.0.0` from 1.0 (same bare format; the same under `airs`, `airs-cli` and `airs-cli-rs`, §21.2) | separate product version |
 | D27 | invalid UTF-8 in the TypeScript registry or config (narrowed in 0.3 to the files `tenant import` reads) | decoded lossily | rejected with the generic message: the registry's `Cannot read tenant registry at <path>; …`, or the import row `skip` with `cannot read a valid tenant config at <path>` (§3.13); the TOML store requires UTF-8 anyway (§3.2, §3.3) | fail closed |
 | D28 | non-numeric `mgmtTsgId` | sent to the token endpoint | local error | SDK requires 1–32 digits |
 | D29 | OAuth Basic credentials | `base64(id:secret)` raw | RFC 6749 form-encoded before base64 | SDK; identical for unreserved characters |
@@ -4450,7 +4458,7 @@ raw scan read, §20.16 choice 77).
 | D47 | server text in scan output (`errors[]` parts, category, scan/report IDs, unknown `result` fields) that carries a configured secret, or control characters in any printed server/file text; from 0.11 also every string a `supplychain` read prints, in every format (§20.3) | printed verbatim | the value is `[withheld]` (an object key carrying a secret drops its entry); reason parts are cut to 200 characters; control characters become U+FFFD in pretty output and on stderr (§2.2, §8.3–§8.5) | secret safety; terminal integrity |
 | D48 | endpoint admission: a non-loopback `http` endpoint, or any endpoint with userinfo, a query or a fragment | sent (the TS SDK accepts any URL string; fetch drops a fragment) | local error `Invalid <key>: endpoints must use https (http is allowed only for loopback hosts) and must not contain credentials, a query or a fragment`, exit 1, zero requests (§5) | never send credentials over plain http off-host; no credential-bearing URLs |
 | D49 | doctor probe retries (Scanner API GET, OAuth token, topics walk; from 0.10 the `Gateway API` probe, whose TypeScript form retries a 5xx into its 5 s timeout, §19.16) | Scanner API probe retries 5xx up to `airsNumRetries`; the topics probe retries 500/502/503/504 until the doctor budget ends; a 401/403 is refreshed and replayed | one attempt per request: no 429/5xx retries, no refresh and replay; the status is classified at once (§9) | a throttled endpoint gets no extra load, and a rate-limited doctor answers in under a second instead of after its 5 s budget (measured live, docs/BENCHMARKS.md) |
-| D50 | `--output markdown`, `csv` or `yaml` on management reads, `tenant list|read|get` and doctor (from 0.11 also every `supplychain` read, which TypeScript renders in six formats, §20.3; extended in 0.10 to every `gateway` command, which TypeScript renders in six formats, the writes and inference in `pretty`, `json` and `yaml`, §19.3; extended in 0.7 to every `runtime dlp` command, the writes, `backup` and `restore` included, which TypeScript renders in all six formats, §16.3, in 0.8 to every `model-security` command, which TypeScript renders in six formats where it resolves `--output`, §17.3, and in 0.9 to every M6d command, which TypeScript renders in six formats, the dashboard and sessions in `pretty`, `json` and `yaml`, §18.3) | rendered (R§1.4), exit 0; the invalid-format message lists six names | usage error `Invalid output format '<x>'. Expected: pretty, table, json` (exit 2, before the tenant is read) | the formats are dropped for good (MILESTONES) |
+| D50 | `--output markdown`, `csv` or `yaml` on management reads, `tenant list|read|get` and doctor (from 8.0 also `runtime profiles create|update`, which TypeScript 7.3.0 renders in `pretty`, `json` and `yaml`, §13.17; from 0.11 also every `supplychain` read, which TypeScript renders in six formats, §20.3; extended in 0.10 to every `gateway` command, which TypeScript renders in six formats, the writes and inference in `pretty`, `json` and `yaml`, §19.3; extended in 0.7 to every `runtime dlp` command, the writes, `backup` and `restore` included, which TypeScript renders in all six formats, §16.3, in 0.8 to every `model-security` command, which TypeScript renders in six formats where it resolves `--output`, §17.3, and in 0.9 to every M6d command, which TypeScript renders in six formats, the dashboard and sessions in `pretty`, `json` and `yaml`, §18.3) | rendered (R§1.4), exit 0; the invalid-format message lists six names | usage error `Invalid output format '<x>'. Expected: pretty, table, json` (exit 2, before the tenant is read) | the formats are dropped for good (MILESTONES) |
 | D51 | tenant `defaultOutput` naming `markdown`, `csv` or `yaml` | valid; management reads render that format | in a TOML tenant file the config is invalid: `Cannot read a valid tenant config at <path>` (exit 1) for every command that reads it, and `tenant set` refuses it; doctor's Config file check fails naming `defaultOutput`, and its hint says which formats remain whenever `defaultOutput` is invalid (§3.3, §9); `tenant import` drops it with a note (§3.12) | a dropped format cannot be honoured, and a silent fallback would hide the misconfiguration |
 | D52 | control characters (ESC, TAB, LF, DEL, C1) from a server or a file in pretty layouts, table cells and status lines (from 0.10 also every `gateway` layout, prompt, acknowledgement and message, the inference model text keeping its line breaks, and C1 escaped in gateway JSON, §19.3, §19.14; from 0.9 also every M6d layout, prompt, outcome line and message, the customer-app `Data` text keeping its line breaks, §18.3; from 0.8 also every model-security layout, prompt, outcome line and message, with descriptions and remediation steps keeping their line breaks, and the forwarded uv output of `install`, §17.3, §17.13; from 0.7 also every DLP layout, prompt, outcome line, warning and message, such as a profile name with ESC in a skipped-profile warning, with a get's `description` keeping its line breaks and tabs, §16.3; from 0.6 also every red team layout, outcome line and message: names, ids, statuses, outcome lines, messages and, apart from their line breaks and tabs, the multi-line server text of §15.3 — report summaries, EULA content, script output, descriptions, prompts, goals, error-log messages; management reads, `tenant list|read|get` (from 0.11 also every `supplychain` table cell, §20.3) including `config.toml`'s `tsg_id` and the store paths, the `tenant read` status line, the import report, write-command outcome lines, doctor details and hints) | written raw: escape sequences reach the terminal, LF and TAB break table rows | replaced by U+FFFD (§2.7); JSON in cells and in the Policy block stays escaped, with DEL and C1 replaced; the red team multi-line server text keeps LF, CR LF and TAB in pretty layouts, as TypeScript prints them (§15.3), a lone CR and every other control replaced | terminal integrity (extends D47 to every renderer) |
 | D53 | table column widths; from 0.11 also the `supplychain` tables (§20.3) | UTF-16 code units: CJK text misaligns by its extra columns, combining marks the other way | display width (UAX #11, `unicode-width`); identical bytes for ASCII, Latin and emoji text (§2.7) | aligned tables |
@@ -4493,20 +4501,20 @@ raw scan read, §20.16 choice 77).
 | D90 | "nothing registered" messages when only a TypeScript registry exists | — (TypeScript has no second store) | the no-selection messages and the empty `tenant list` status get the suffix `; a TypeScript tenant registry exists at <path>: run 'airs tenant import' to copy it` (§3.4; `airs-cli-rs` in 0.3–0.11, D73) | an upgraded user sees how to bring the tenants over |
 | D91 | parse errors of `tenant create`, `set` and `unset` | commander: `too many arguments for '<cmd>'. Expected N arguments but got M.` (no value), but `unknown option '<arg>'` quotes the whole argument, `--stdin=<value>` included | never quote an argument value: the TypeScript excess-positional text, `option '<flag>' does not take a value`, or `unknown option for '<leaf>' (not shown, as it may be a secret); …` (an option name of some command is still named), then clap's usage line (§2.2) | a secret typed in the wrong place must not reach the terminal or a CI log |
 | D92 | `tenant set <name> <key>` without a value on a tenant that cannot be changed (missing or invalid file, pin mismatch) | prompts first, then fails after the answer | fails before prompting (§3.11 set step 8) | no secret is typed for a tenant that cannot be changed |
-| D93 | management endpoint and credentials of `topics create`, `apply` and `revert` | the client is built without the tenant's `mgmtEndpoint` and without the credential check: data requests go to `PANW_MGMT_ENDPOINT`, else `https://api.apps.paloaltonetworks.com/aisec`, with the tenant's bearer token; a missing credential or token endpoint falls back to `PANW_MGMT_*` (a missing one reads `AISEC_MISSING_VARIABLE:…`) | the tenant's endpoints and the §3.5 credential check, as for every other command; no environment variable is read (§13.2) | the tenant's token must never reach a host the tenant did not name (safety) |
-| D94 | `--output` on M4 commands | the root parser consumes `--output` (every value, invalid ones included, is ignored); `create`, `apply`, `revert` and `eval` reach JSON only through the hidden `--format json` (any other value is pretty); `cleanup`'s JSON is unreachable; `topics sample --output <path>` is ignored (CSV on stdout) | `--output pretty|table|json` honoured on every M4 command that renders data (`table` is Rust-only; `cleanup` prints one JSON document); the hidden `--format` keeps the TS warning, its value is validated like `--output`, and `--output` wins over it; `sample --output <path>` is an invalid format (exit 2) (§13.1, §13.2) | flag meaning; one `--output` rule for every command (correctness) |
+| D93 | management endpoint and credentials of `topics create` (from 8.0 only `create`: TypeScript 7.3.0 builds the `apply` and `revert` client from the tenant, `managementClientOptions`, as airs-cli-rs does) | the client is built without the tenant's `mgmtEndpoint` and without the credential check: data requests go to `PANW_MGMT_ENDPOINT`, else `https://api.apps.paloaltonetworks.com/aisec`, with the tenant's bearer token; a missing credential or token endpoint falls back to `PANW_MGMT_*` (a missing one reads `AISEC_MISSING_VARIABLE:…`) | the tenant's endpoints and the §3.5 credential check, as for every other command; no environment variable is read (§13.2) | the tenant's token must never reach a host the tenant did not name (safety) |
+| D94 | `--output` on M4 commands | the root parser consumes `--output` (every value, invalid ones included, is ignored) on `apply`, `revert` and `eval`, which reach JSON only through the hidden `--format json` (any other value is pretty); `cleanup`'s JSON is unreachable; `topics sample --output <path>` is ignored (CSV on stdout); from 7.3.0 `profiles create|update` resolve `--output` (and the tenant's `defaultOutput`) to `pretty`, `json` or `yaml` and refuse `table` (`Output format 'table' is not supported here`, exit 2) | `--output pretty|table|json` honoured on every M4 command that renders data (`table` is Rust-only; `cleanup` prints one JSON document; `profiles create|update` also take the tenant's `defaultOutput`, §13.17); the hidden `--format` keeps the TS warning, its value is validated like `--output`, and `--output` wins over it; `sample --output <path>` is an invalid format (exit 2) (§13.1, §13.2) | flag meaning; one `--output` rule for every command (correctness) |
 | D95 | management write retries (extended in 0.9 to the M6d writes: API keys, customer apps and the restore's creates and updates, where TypeScript re-sent a key create 4 times after three 502s and 6 times after timeouts, §18.3) | POST, PUT and DELETE re-sent up to 5 times on 500/502/503/504, network errors and timeouts, and once after a 401 or a 403 without `x-opa-decision: false` | one attempt; a 401 is replayed once with a fresh token (TS parity), a 403 never; an outcome-unknown failure adds `Outcome unknown: the <thing> may have been <done>.`, a 2xx with an unreadable body `Outcome: the <thing> was <done>, but the response could not be read.` (§13.2) | a replayed write can create a duplicate or repeat a forced delete; the CLI cannot see the header that makes a 403 replay safe (safety) |
-| D96 | which revision `topics create`, `apply` and `revert` act on | the first record with that name in an unfiltered listing, of any revision: an older profile revision's policy can be written back, and the first-listed topic id is pinned or updated | the §7.2 `get` rule for profile and topic: highest revision (unset = 0), first on ties (§13.2) | never regress a profile to an old revision (safety) |
+| D96 | which revision `topics create`, `apply` and `revert` act on | the first record with that name in an unfiltered listing, of any topic revision: the first-listed topic id is pinned or updated (from 7.3.0 `apply` and `revert` take the highest profile revision, as airs-cli-rs does; before, an older profile revision's policy could be written back) | the §7.2 `get` rule for profile and topic: highest revision (unset = 0), first on ties (§13.2) | never pin or update an old topic revision (safety) |
 | D97 | read-modify-write of a profile by `apply` and `revert` | three to five listings before the PUT; the policy comes from a later read than the topic refs, so a change in between is silently lost; a no-op apply still writes a new revision | the policy is computed from one profile read taken last, with no request between it and the PUT; an unchanged policy is not written (status line); the remaining one-round-trip window is documented (§13.4) | narrow the lost-update window; no needless revisions (safety) |
-| D98 | the profile's other topic refs during `apply` and `revert` | every ref is rebuilt: re-pinned to the topic's current revision (revision 0 for a deleted topic), other keys dropped, groups regrouped by action | refs of other topics are kept exactly as read (pin, keys, group order); only the named topic's refs change (§13.4) | an apply must not change topics it was not asked about (correctness) |
-| D99 | `topics revert` | rewrites the profile, then always fails `updatedBy is required` before deleting the topic (exit 1, profile already changed); removing the last ref leaves an empty `block` guardrail ("block all unless explicitly allowed"); a profile without the topic still gets a guardrail section written | writes the profile only when it references the topic; removing the last ref removes the `topic-guardrails` item; then a plain delete of the topic (never the force endpoint); a 409 on the delete (the topic is still referenced, often by an older revision) keeps the topic with a warning and exits 0 (0.4.1); any other delete failure after the PUT says the profile was updated (§13.9) | the command can succeed, never blocks all traffic by accident, and never strips the topic from other profiles (correctness, safety) |
-| D100 | `profiles update` and the `active` flag | commander defaults `active` to true, so every update without `--no-active` re-activates the profile; a flagless update still PUTs | `active` kept from the read record unless `--active`/`--no-active` (which conflict); an update with nothing to change is a usage error (§13.13) | an update must change only what was asked (correctness) |
-| D101 | `profiles create` answered 409 | branch on the text `409`: a JSON 409 prints the server message; an empty or non-JSON 409 looks the name up and prints `Profile created` with the pre-existing profile (exit 0), or `already exists` when it is absent; any message containing `409` takes the branch | a 409 status is `Profile "<name>" already exists. Use 'profiles update' to modify it.` with `HTTP 409`, exit 1, no lookup (§13.12) | never report another profile as created (correctness) |
-| D102 | `profiles create`/`update` flag values | no protection flag: no `policy`, which the SDK always refuses (exit 1); `--max-inline-latency` is `parseFloat`, so a fraction or `abc` fails the schema (exit 1); `--dlp-profiles`/`--mask-data-inline` without `--dlp-action` are ignored | usage errors before the tenant: `Specify at least one policy flag …`, `--max-inline-latency must be a non-negative integer`, `--dlp-profiles and --mask-data-inline require --dlp-action` (§13.12) | fail early on a command that cannot succeed or would drop flags (correctness) |
-| D103 | input files (`--config` of `profiles create|update` and `topics update`, `--prompts`) | read after the tenant (`profiles update`: after the lookup); with `--config`, `--name` and every other flag are ignored and the file's `profile_name` silently creates or renames; raw Node `ENOENT`/`JSON.parse` texts, which quote file content | read before the tenant (regular file, bounded, UTF-8, a JSON object) with fixed messages that echo no content; `--config` with another body flag is a usage error; the file's `profile_name` must match `--name` (create) or the resolved profile (update) (§13.2, §13.12, §13.13) | ignored flags and silent renames; error text must not echo file content (correctness, safety) |
+| D98 | the profile's other topic refs during `apply` and `revert` | every ref is rebuilt: re-pinned to the topic's current revision (revision 0 for a deleted topic) and regrouped by action; from 7.3.0 its other keys and each group's other keys are kept | refs of other topics are kept exactly as read (pin, keys, group order); only the named topic's refs change (§13.4) | an apply must not change topics it was not asked about (correctness) |
+| D99 | `topics revert` | from 7.3.0: writes the profile, then a plain delete of the topic (never the force endpoint); a profile that does not reference the topic is refused (`Topic "<name>" is not assigned to the selected protection section`, exit 2, nothing written), as in airs-cli-rs; still, removing the last ref leaves an empty `block` guardrail ("block all unless explicitly allowed"), and a 409 on the delete (the topic is still referenced, often by an older revision) is an error after the profile was written (exit 1). Before 7.3.0 it always failed `updatedBy is required` before the delete | removing the last ref removes the `topic-guardrails` item; a 409 on the delete keeps the topic with a warning and exits 0 (0.4.1); any other delete failure after the PUT says the profile was updated (§13.9) | the command can succeed and never blocks all traffic by accident (correctness, safety) |
+| D100 | `profiles update` with nothing to change | a flagless update (or one with only `--direction`/`--ai-profile-index`) still PUTs, minting a new revision; `active` is kept unless `--active`/`--no-active` from 7.3.0 (before, commander defaulted it to true and every update re-activated the profile) | an update with nothing to change is a usage error before the tenant; `active` kept from the read record unless `--active`/`--no-active` (which conflict) (§13.13) | an update must change only what was asked (correctness) |
+| D101 | `profiles create` answered 409 | from 7.3.0 the SDK's error, exit 1, no lookup: an empty 409 reads `AISEC_CLIENT_SIDE_ERROR:API error 409`, a JSON one echoes the server message (before 7.3.0, an empty or non-JSON 409 looked the name up and printed `Profile created` with the pre-existing profile, exit 0) | `Profile "<name>" already exists. Use 'profiles update' to modify it.` with `HTTP 409`, exit 1, no lookup (§13.12) | name the conflict without echoing server text (D107) (correctness) |
+| D102 | `profiles create`/`update` flag values | from 7.3.0: no protection flag creates the profile with an empty `policy` (`{}`, exit 0); `--max-inline-latency` is `Number(...)`, so `1e1`, `0x10` and an empty value are numbers and a fraction or `abc` fails the request schema (exit 2, its field text); on create, `--dlp-profiles` or `--[no-]mask-data-inline` without `--dlp-action` fails the schema (exit 2) | usage errors before the tenant with fixed texts: `Specify at least one policy flag …`, `--max-inline-latency must be a non-negative integer` (decimal digits only), `--dlp-profiles and --[no-]mask-data-inline require --dlp-action when creating a profile`; on update those flags change only their fields, as in 7.3.0 (§13.12, §13.17) | fail early on a command that cannot succeed or would create a profile without protections, which the AIRS UI cannot show (correctness) |
+| D103 | input files (`--config` of `profiles create|update` and `topics update`, `--prompts`) | `profiles update --config` silently renames when the file's `profile_name` differs; raw Node `ENOENT`/`JSON.parse` texts, which quote file content (from 7.3.0 a profile file's errors are usage errors, exit 2; `topics update` and `--prompts` read after the tenant, exit 1) | read before the tenant (regular file, bounded, UTF-8, a JSON object) with fixed messages that echo no content (exit 1); `--config` with another body flag is a usage error (TS 7.3.0 refuses it too); an update file's `profile_name` must name the resolved profile (§13.2, §13.12, §13.13) | silent renames; error text must not echo file content (correctness, safety) |
 | D104 | usage checks before the tenant | `topics create` limits, a non-UUID `<topicId>`, `topics delete --force` without `--updated-by` and eval's `--profile` checks fail after the tenant read (exit 1); `profiles delete --force` without `--updated-by` exits 2 after list requests; whitespace-only `--updated-by` reaches the profiles force endpoint; an `--updated-by` with a control character (TAB, ESC, …) is sent form-encoded | all are usage errors (exit 2) before the tenant is read; `--updated-by` must be non-blank and free of control characters for every force delete and `profiles cleanup` (`--updated-by <email> must not contain control characters`) (§13.2, §13.5–§13.15) | usage contract (D2, D18) |
 | D105 | confirmations (`topics delete`, `revert`, `profiles delete`, `cleanup`) | interactive iff stdout is a terminal; prompt on stdout; inquirer answers; `revert` asks before reading the tenant; `profiles delete`'s refusal comes after list requests and names the resolved profile; `cleanup` without `--force` and a terminal prints the preview and exits 0 | the D81 rules (stdin and stderr terminals, stderr prompt, `y`/`yes`, EOF declines, Ctrl-C 130 with `Cancelled; nothing was changed.`); refusals before the tenant (`profiles delete` names the argument); `revert` asks after the topic lookup; `cleanup` without `--force` and a terminal is the usage error and `--dry-run` previews; after an interactive cleanup confirmation the listing is re-read and nothing is deleted if it changed (§13.2, §13.15) | the settled 0.3 rules; a confirmed cleanup deletes only what was shown (safety) |
-| D106 | streams and `--quiet` of M4 commands | outcome lines (`✓ Topic created…`, `✓ Profile deleted…`, `Sample CSV written…`, cleanup's per-revision lines and summary, `ℹ Aborted`) on stdout, success lines not quiet-suppressed; the banner is on stdout of a failing run; eval's `TP: … Total:` line is quiet-suppressed | outcome lines on stderr, success and info lines quiet-suppressed, failures and warnings never; stdout carries only data and is empty when the command fails; the eval counts line is data (§13.2) | stdout carries data only (D74, D57, D55) |
+| D106 | streams and `--quiet` of M4 commands | outcome lines (`✓ Topic created…`, `✓ Profile deleted…`, `Sample CSV written…`, cleanup's per-revision lines and summary, `ℹ Aborted`) on stdout, success lines not quiet-suppressed; the banner is on stdout of a failing run; eval's `TP: … Total:` line is quiet-suppressed (from 7.3.0 `profiles create|update` print a quiet-suppressed status line on stderr, `Profile created|updated: <id>`, as airs-cli-rs does) | outcome lines on stderr, success and info lines quiet-suppressed, failures and warnings never; stdout carries only data and is empty when the command fails; the eval counts line is data (§13.2) | stdout carries data only (D74, D57, D55) |
 | D107 | server text in M4 outcomes | `topics delete --force` prints the server's message (`✓ undefined` for `{}`); errors echo server messages, and 409 conflict payloads are not shown either | the fixed line `✓ Topic <id> force-deleted.`; errors per §6 (D11) (§13.7) | secret safety; terminal integrity |
 | D108 | `profiles cleanup` pagination | its own loop: `next_offset: 0` re-fetches offset 0 forever (79,520 requests in 8 s observed), no repeated-cursor or size bound | the SDK walk: 0 or absent ends it, a repeated cursor or an empty intermediate page stops it with the D37 error, the D40 bounds apply, nothing is deleted from an incomplete listing (§13.15) | fail closed; never loop or delete from a partial list (safety) |
 | D109 | how `profiles cleanup` deletes, and its audit identity | always the force endpoint, which detaches the revision from referencing policies; `--updated-by` defaults to `git config user.email` run in the current directory | a plain delete per revision (a referenced revision fails with its 409 and is kept); `--updated-by <email>` selects the force endpoint with that email; no git fallback (§13.15) | a bulk cleanup must not silently detach security policies, and an audit identity from an unrelated repository is wrong (safety, correctness) |
@@ -4515,9 +4523,9 @@ raw scan read, §20.16 choice 77).
 | D112 | `topics eval --rate` and `--concurrency` | `parseInt`: `2.5` → 2; `--rate 0` or `abc` means no limit; `--concurrency 0`, `abc` or negative fail after the tenant and CSV are read (exit 1); no upper bound | decimal integers, `--rate` ≥ 1 and `--concurrency` 1–32, usage errors before the tenant (§13.10) | strict parsing (D17); the SDK queues requests beyond 32 against their deadlines (correctness) |
 | D113 | `topics sample` content | four rows mixing `block` and `allow`, which `topics eval` rejects (`All rows must have the same intent value`) | the two `block` rows only (100 bytes), which `topics eval` accepts (§13.11) | the sample must be valid input for the command it documents (correctness) |
 | D114 | `topics sample --output-file` | `writeFile` silently overwrites an existing file or a symlink's target | an existing path or symlink is refused (`<path> already exists; choose another --output-file`, exit 1); the file is created exclusively; failures use fixed messages (§13.11) | an existing file is never overwritten (MILESTONES) (safety) |
-| D115 | Node crashes and JS artefacts in M4 commands | `profiles create` tenant and credential errors and `topics sample` write errors are unhandled rejections (a Node stack trace with install paths, exit 1); a record without its id is used as `undefined` (`PUT …/uuid/undefined` → `Invalid profile_id: undefined`); an empty `ai-security-profiles` array throws a TypeError | the §2.2 error block; `<Topic|Profile> <x> has no <topic_id|profile_id>`; an empty array is treated as absent (§13.2, §13.4) | every message is contractual (D87) |
-| D116 | request-body validation text (`--config` and built bodies; extended in 0.6 to every red team body, §15.3, in 0.7 to the DLP pattern and filtering-profile bodies, which DLP reports with exit 2 as TypeScript does, §16.3, and in 0.8 to every model-security body, exit 1 for a `--config` file and 2 for `groups update`'s flags, §17.3) | `AISEC_USER_REQUEST_PAYLOAD_ERROR:Request body for <METHOD> <path> did not match schema: <field>: <code>[; …]` | the same text without the field list (§13.2) | the SDK keeps no field paths (as D38 for responses) |
-| D117 | `profiles update --dlp-action` | replaces `data-leak-detection` wholesale, dropping its `member` DLP profiles and `mask-data-inline` unless they are given again | field overlay: `member` and `mask-data-inline` change only with `--dlp-profiles` and `--mask-data-inline` (§13.13) | changing the action must not silently remove DLP profiles from a security profile (safety) |
+| D115 | Node crashes and JS artefacts in M4 commands | `topics sample` write errors are unhandled rejections (a Node stack trace with install paths, exit 1; `profiles create`'s tenant and credential errors were too before 7.3.0); a record without its id is used as `undefined` (`PUT …/uuid/undefined` → `Invalid profile_id: undefined`); before 7.3.0 an empty `ai-security-profiles` array threw a TypeError | the §2.2 error block; `<Topic|Profile> <x> has no <topic_id|profile_id>`; an empty array is treated as absent (§13.2, §13.4), as 7.3.0 does | every message is contractual (D87) |
+| D116 | request-body validation text (`--config` and built bodies; extended in 0.6 to every red team body, §15.3, in 0.7 to the DLP pattern and filtering-profile bodies, which DLP reports with exit 2 as TypeScript does, §16.3, and in 0.8 to every model-security body, exit 1 for a `--config` file and 2 for `groups update`'s flags, §17.3, and in 8.0 to the `profiles create|update` bodies, which both CLIs refuse with exit 2 before the tenant (a `--config` file, a flag body) or after the read (a merged update), TypeScript with its zod text, §13.17) | `AISEC_USER_REQUEST_PAYLOAD_ERROR:Request body for <METHOD> <path> did not match schema: <field>: <code>[; …]` | the same text without the field list (§13.2) | the SDK keeps no field paths (as D38 for responses) |
+| D117 | `profiles update --dlp-action` (**retired in 8.0**: TypeScript 7.3.0 merges recursively, so the DLP profiles and `mask-data-inline` stay) | replaced `data-leak-detection` wholesale before 7.3.0 | field overlay (§13.13, §13.17) | retired: 7.3.0 matches; the number is not reused |
 | D118 | bulk-scan state: location, format and durability | `<dirname(dataDir)>/bulk-scans/<createdAt>-<uuid>.bulk-scan.json` (default `~/.prisma-airs/bulk-scans/`), JSON version 2; temp + rename with no fsync; no symlink, owner or mode check; an existing directory is chmod'ed on the first save; errors are `Invalid bulk-scan state: …` without the path | `$XDG_STATE_HOME/airs-cli/bulk-scans/<job>.bulk-scan.json` (default `~/.local/state/airs-cli/bulk-scans/`), a Rust-only versioned format with an attempt journal; directory 0700 and files 0600 with the §3.8 checks, descriptor-relative; temp + fsync + rename + directory fsync before every submission and before every poll; `resume-poll` refuses a TypeScript state with a message, and there is no import (§14.9, §14.10) | a checkpoint must survive a crash for exactly-once submission; the CLI owns its files (D70) (safety) |
 | D119 | bulk-scan job lock | `<state>.lock` installed with `link()`, holding `{pid, createdAt, token}`; liveness by `kill(pid, 0)` (a reused pid, or one that answers `EPERM`, keeps it forever; two processes can both recover a stale lock); a malformed lock needs manual removal; left behind by every signal | `flock` on `<job>.lock` next to the state, refused at once naming the holder's pid, host and start time; the kernel releases it when the holder dies; the file is never deleted; a lock counts only while it is on the file at `<job>.lock` (checked after the `flock` and before every submission, so a removed lock file stops its holder before it submits again, §14.11) | no stale or stolen locks and no manual clean-up (safety) |
 | D120 | argument and size checks before a submission | `--profile` (`""`, over 100) and `--session-id` over 100 fail the SDK schema when the first chunk is serialised, after the state exists: the chunk is recorded as ambiguous though nothing was sent, so the job can never resume; prompts over 2 MiB and bodies of any size are sent; `--output-file ""` fails with `EISDIR` after the state exists | usage errors (exit 2) before the tenant for `--profile`, `--session-id` and an empty `--output-file`; a prompt over 2,097,152 bytes is refused before the tenant (exit 1); chunks are split to fit the SDK request limit (a prompt that cannot fit a body on its own is D132); a submission the SDK refuses before sending (`NotSent`) leaves its prompts pending (§14.2, §14.3, §14.5, §14.6) | a request that was never sent must not block the job (correctness) |
@@ -4687,6 +4695,11 @@ raw scan read, §20.16 choice 77).
 | D329 | target answers with a Vertex AI `target_connection_config` or the `client_session` multi-turn config (1.0, scm-sdk 0.2.3) in `targets get`, the `create`, `update`, `probe` and `update-profile` answers and the `targets backup` reads | the zod response schema refuses the answer (`AISEC_RESPONSE_VALIDATION:Response did not match schema: connection_params: invalid_union`, exit 1; a backup's failed row), as 0.11 (scm-sdk 0.2.2) did with its decode message | read and printed (redacted, §15.4 rules 1, 3 and 4) and backed up; a backup read whose Vertex AI field breaks its request pattern (a server mask) is a failed row naming the masked fields and the remedy when they alone fail the create schema (`the service masked its Vertex AI project_id, which the target create schema refuses; recreate the target or set its identifiers by hand`; §15.18, §15.24 choice 13), one with a mask only in `customer_sa_email` is stored with `credentialsWithheld: true` (§15.24); a backup read whose answer carries `VERTEX_AI`, `N8N` or `REALTIME` without either config (read by 0.11 and TypeScript alike: their response schemas hold these as strings) is stored too, where 0.11 recorded the failed row `its settings do not match the target create schema` and exited 1, its create schema refusing the values (TypeScript stores it, under D151) | the pinned SDK's management 0.86.0 contract (response validation keeps the G25 relaxation and enforces no request pattern) |
 | D330 | the `airs-cli` name (8.0) | the TypeScript CLI (npm `bin` `airs-cli`): `Usage: airs-cli …`, `$ airs-cli …` examples, its own version | the Rust CLI under a third name (a `[[bin]]`, a relative tarball symlink, a Homebrew `install_symlink` and an npm `bin`, §21.2, §21.16) that prints exactly the bytes of `airs`: usage lines, examples and hints name `airs` (D73), `--version` prints the Rust version | the Rust CLI replaces the TypeScript CLI in `cdot/prisma-airs-cli` and on npm; 7.x scripts that run `airs-cli` keep working with the Rust CLI's behaviour |
 | D331 | doctor's `Executable` check (8.0) | none (its first check is `Node.js version`; `PATH` is never examined) | the first check, always evaluated: `warn` when another `airs`, `airs-cli` or `airs-cli-rs` earlier on `PATH` resolves to a different file than this program, else `pass`; never `fail`, so the exit code is unchanged (§21.15) | the four install channels can shadow each other (Homebrew's Node and the formula share `/opt/homebrew/bin`), and a stale TypeScript `airs-cli` may come first |
+| D332 | `--ai-profile-index <n>` (`profiles update`, `topics apply|revert`, 8.0) | `Number(value)`: `0x0`, `1e0`, `" 1"` and an empty value are indexes | decimal digits only (at most 2^53 − 1), else `--ai-profile-index must be a nonnegative integer` (exit 2, before the tenant) (§13.17) | strict parsing (D17) |
+| D333 | which refs `topics revert` counts as the topic's in its 8.0 reference checks | the in-scope check needs a ref with the first-listed revision's id and the name, the cross-direction check matches the name only: a ref pinned to another revision of the topic is "not assigned" | the §13.4 identity, as the surgery uses: a ref whose `topic_name` is the name or whose `topic_id` is the id of any listed revision with that name (§13.17) | the checks must see every ref the surgery removes (correctness) |
+| D334 | a profile answer (`profiles get`, `list`, the `create` and `update` answers, the reads of `topics apply\|revert`, `profiles backup`) whose newly modelled scm-sdk 0.2.4 fields hold an unexpected value: an explicit `null` or a wrong type for `dlp_tenant_id`, `content-type-mode`, `content-type-configurations`, a known direction or `enable-full-conversation-inspection` (8.0) | TS SDK 0.35.0's response schema refuses the whole read: `AISEC_RESPONSE_VALIDATION:Response did not match schema: …` (exit 1), nothing printed | the read succeeds (scm-sdk 0.2.4's tolerant response binding keeps the value in the model's extensions) and the value is printed and backed up as sent: `dlpTenantId` is the record's value (`null`, a number), the pretty `DLP tenant` line its compact JSON, the policy every key as sent; a flag update, `topics apply\|revert` or a restore that would send the value back fails the request schema before its write (the D116 text; exit 2 for `profiles update`, exit 1 for the topic commands and restore) (§13.17, §15.25) | a faithful read must not hide what the service stores (G25, D306), and the request schema still guards every write |
+| D335 | `profiles create --direction <d>` with flags: the directions it writes (8.0) | `content-type-configurations` holds only `<d>`; the live service refuses that body with HTTP 400 for every direction (B7, 2026-10-22) | `<d>` holds the flags' protections and the other three known directions (`prompt`, `response`, `tool-call`, `tool-response`) are written as empty objects; the rest of the body is TS's (§13.17) | the service requires all four direction keys in a directional entry (observed live; the body padded this way is accepted), so the TS body can never be created |
+| D336 | `profiles create --direction <d>` whose flags fill no direction: no policy flag, or shared settings only (`--max-inline-latency`, `--inline-timeout-action`, `--[no-]mask-data-in-storage`, `--[no-]enable-full-conversation-inspection`) (8.0) | refuses only the flagless create, with `Directional flag creation requires at least one protection or shared setting; use --config for an empty policy` (exit 2); a shared-only create is sent (`{<d>: {}}` and the shared settings), and the live service refuses it with HTTP 400 (B7) | the flagless and the shared-only create are both refused before OAuth (exit 2, no request) with `Directional flag creation requires at least one protection flag, not only shared settings: the service refuses a directional policy with no protection in any direction` (§13.12, §13.17); the D102 flag checks run first, so an invalid shared value (`--max-inline-latency 1.5`) gets its D102 text | the service refuses a directional policy whose four directions are all empty (observed live, B7, also with the shared settings set), so the request can only fail; and an empty policy through `--config`, which TS's text suggests, is refused too |
 
 ## 13. M4 runtime writes (0.4)
 
@@ -4710,12 +4723,12 @@ program name `airs`.
 | `runtime topics create` | `Create or update a custom topic definition` | `--name <name>` (required, `Topic name`), `--description <desc>` (required, `Topic description`), `--examples <examples...>` (required, one or more values, `Example prompts (2-5 required)`), hidden `--format <format>` |
 | `runtime topics update <topicId>` | `Update a custom topic` | `--config <path>` (required, `JSON file with topic updates`) |
 | `runtime topics delete\|rm <topicId>` | `Delete a custom topic` | `--force` (`Skip confirmation and force delete (removes from all referencing profiles)`), `--updated-by <email>` (`Email of user performing force deletion`) |
-| `runtime topics apply` | `Assign a topic to a security profile (additive)` | `--profile <name>` (required, `Security profile name`), `--name <name>` (required, `Topic name to assign`), `--intent <intent>` (`Topic intent: block or allow`, default `block`), hidden `--format <format>` |
-| `runtime topics revert` | `Remove a custom topic from a profile and delete it` | `--profile <name>` (required), `--name <name>` (required, `Topic name to remove`), `--force` (`Skip confirmation prompt`), hidden `--format <format>` |
+| `runtime topics apply` | `Assign a topic to a security profile (additive)` | `--profile <name>` (required, `Security profile name`), `--name <name>` (required, `Topic name to assign`), `--intent <intent>` (`Topic intent: block or allow`, default `block`), from 8.0 `--direction <direction>` (`Protection direction: prompt, response, tool-call, tool-response`) and `--ai-profile-index <n>` (`AI profile entry index (zero-based)`) (§13.17), hidden `--format <format>` |
+| `runtime topics revert` | `Remove a custom topic from a profile and delete it` | `--profile <name>` (required), `--name <name>` (required, `Topic name to remove`), `--force` (`Skip confirmation prompt`), from 8.0 `--direction <direction>` and `--ai-profile-index <n>` (as `apply`, §13.17), hidden `--format <format>` |
 | `runtime topics eval` | `Evaluate a topic against a static prompt set and compute metrics` | `--profile <name>` (required, `Security profile name`), `--prompts <path>` (required, `Path to CSV file with prompt,expected,intent columns`), `--topic <name>` (`Topic name (for output labeling)`, default `unknown`), `--rate <n>` (`Max AIRS scan API calls per second`), `--concurrency <n>` (`Concurrent scan requests`, default `5`), hidden `--format <format>` |
 | `runtime topics sample` | `Print a sample CSV file showing the eval prompt format` | `--output-file <path>` (`Write to file instead of stdout`) |
-| `runtime profiles create` | `Create a new security profile` | `--name <name>` (required, `Profile name`), `--no-active` (`Create profile as inactive`), the policy flags below, `--config <path>` (`JSON file with profile configuration (legacy)`) |
-| `runtime profiles update <nameOrId>` | `Update a security profile by name or UUID` | `--name <name>` (`Update profile name`), `--active` (`Set profile as active`), `--no-active` (`Set profile as inactive`), the policy flags below, `--config <path>` (`JSON file with profile updates (legacy)`) |
+| `runtime profiles create` | `Create a new security profile` | `--name <name>` (`Profile name (required unless --config is supplied)`, from 8.0; required before), `--no-active` (`Create profile as inactive`), the policy flags below, from 8.0 `--direction <direction>` (`Protection direction: prompt, response, tool-call, tool-response`), `--config <path>` (`Complete JSON profile configuration; exclusive with write flags`; `JSON file with profile configuration (legacy)` before 8.0) (§13.17) |
+| `runtime profiles update <nameOrId>` | `Update a security profile by name or UUID` | `--name <name>` (`Update profile name`), `--active` (`Set profile as active`), `--no-active` (`Set profile as inactive`), the policy flags below, from 8.0 `--direction <direction>` and `--ai-profile-index <n>` (`Select an AI entry in a multi-entry policy (zero-based)`), `--config <path>` (`Complete JSON replacement; exclusive with write flags`; `JSON file with profile updates (legacy)` before 8.0) (§13.17) |
 | `runtime profiles delete\|rm <nameOrId>` | `Delete a security profile by name or UUID` | `--force` (`Skip confirmation and force delete (removes from referencing policies)`), `--updated-by <email>` (`Email of user performing force deletion`) |
 | `runtime profiles cleanup` | `Delete old profile revisions, keeping only the latest per name` | `--force` (`Skip confirmation — proceed with deletion`), `--updated-by <email>` (`Force-delete with this audit email; detaches the revisions from referencing policies`, D109), `--dry-run` (Rust-only, `Show what would be deleted and delete nothing`, D105) |
 
@@ -4732,10 +4745,14 @@ protection action (block/allow/alert)`), `--url-action <action>` (`URL detected 
 `--db-security-create|read|update|delete <action>` (`Database <op> action
 (block/allow/alert)`), `--inline-timeout-action <action>` (`Inline timeout action
 (block/allow)`), `--max-inline-latency <n>` (`Max inline latency in seconds`),
-`--mask-data-in-storage` (no value, `Mask data in storage`).
+`--mask-data-in-storage` (no value, `Mask data in storage`). From 8.0 (TS 7.3.0, §13.17) also
+`--no-mask-data-inline` (`Disable inline masking`), `--no-mask-data-in-storage` (`Disable
+storage masking`), `--enable-full-conversation-inspection` (`Enable shared conversation
+inspection`) and `--no-enable-full-conversation-inspection` (`Disable shared conversation
+inspection`); of a positive/negative pair the last one given wins.
 
-- **Protection flags** are the policy flags except `--dlp-profiles` and
-  `--mask-data-inline` (TS `hasAnyProtectionFlag`). Action values are not validated
+- **Protection flags** are every policy flag (TS 7.3.0 `hasAnyProtectionFlag`, §13.17; before
+  8.0 `--dlp-profiles` and `--mask-data-inline` were not). Action values are not validated
   (the service validates them, TS parity).
 - **`--max-inline-latency`**: decimal digits only, at most 2^53, else the usage error
   `--max-inline-latency must be a non-negative integer` (D102).
@@ -4786,7 +4803,8 @@ error and no file content is echoed):
 
 **Request bodies.** Every body the CLI sends is validated locally with the SDK's request
 schema (`CreateCustomTopicRequest::parse` / `CreateSecurityProfileRequest::parse`,
-`Mode::Request`) before it is sent; unknown keys are kept (`extensions`). A failure is
+`Mode::Request`; from 8.0 a profile body first passes the TypeScript 0.35.0 request root,
+§13.17) before it is sent; unknown keys are kept (`extensions`). A failure is
 `AISEC_USER_REQUEST_PAYLOAD_ERROR:Request body for <METHOD> <path> did not match schema`
 (exit 1, no request for it), where `<path>` is the request path with the id
 (`PUT /v1/mgmt/topic/uuid/<id>`, `POST /v1/mgmt/profile`). TypeScript appends the
@@ -4827,13 +4845,14 @@ exception of §13.15. The outcome lines of TypeScript (`ui.success`, `ui.info`,
 `ui.warn`) go to stderr with their TypeScript text and colours: success and info lines
 are quiet-suppressed, warning and failure lines are not. The banner
 `Prisma AIRS — Runtime Configuration` is printed only above a data layout (the §7.6
-detail layouts and the cleanup preview). The tenant's `defaultOutput` is ignored by
-every M4 command (TypeScript reads it only for reads). Per command:
+detail layouts and the cleanup preview; from 8.0 not above the `profiles create|update`
+detail, §13.17). The tenant's `defaultOutput` is ignored by every M4 command except, from
+8.0, `profiles create|update` (TypeScript 7.3.0 resolves it there, §13.17). Per command:
 
 | Command | `pretty` | `table` | `json` |
 |---|---|---|---|
 | `topics create` | key/value block (§13.5) | `Key │ Value` of the record | the §13.5 record |
-| `topics update`, `profiles create`, `profiles update` | the §7.6 detail layout of the response | the §7.6 detail table | the §7.5 object |
+| `topics update`, `profiles create`, `profiles update` | the §7.6 detail layout of the response (from 8.0 without the banner for the profile writes, §13.17) | the §7.6 detail table | the §7.5 object |
 | `topics apply`, `topics revert` | key/value block (§13.8, §13.9) | `Key │ Value` of the record | the record |
 | `topics eval` | §13.10 | §13.10 | §13.10 |
 | `profiles cleanup` | §13.15 | §13.15 | §13.15 |
@@ -4907,10 +4926,12 @@ expected revision, S§2), so these rules keep the lost-update window to one roun
 `policy`:
 - `ai-security-profiles`: absent or an empty array → `[{"model-type": "default",
   "model-configuration": {}}]` (TS creates it when absent and throws on an empty array,
-  D115). Only element 0 is touched. `model-configuration` absent → `{}`;
+  D115). From 8.0 the edited block is the one §13.17 selects (`--direction`,
+  `--ai-profile-index`; without them a single legacy entry's `model-configuration`), and
+  every other entry and direction is kept as read. The block absent → `{}`;
   `model-protection` absent → `[]`.
-- The guardrail item is the first `model-protection` element whose `name` is
-  `topic-guardrails`. When it is missing, `apply` appends
+- The guardrail item is the `model-protection` element whose `name` is
+  `topic-guardrails` (from 8.0 a block with more than one is refused, §13.17). When it is missing, `apply` appends
   `{"name": "topic-guardrails", "action": <set below>, "options": [], "topic-list": []}`.
 - A ref is one element of a `topic-list[i].topic` array. The refs **of the topic** are
   those whose `topic_name` equals the topic's name or whose `topic_id` equals the id of
@@ -4931,7 +4952,8 @@ expected revision, S§2), so these rules keep the lost-update window to one roun
   refs remain, the item's `action` is `allow` if any remaining ref is in a group whose
   `action` is `block`, else `block` (TypeScript's rule). When none remain, the
   guardrail item is removed from `model-protection` (TS leaves `action: block` with an
-  empty list, D99). When the topic had no ref, the policy is unchanged.
+  empty list, D99). When the topic has no ref in scope, `revert` is refused (§13.17, from
+  8.0; before, the policy was left unchanged and the topic still deleted).
 
 ### 13.5 `runtime topics create`
 
@@ -5032,9 +5054,9 @@ Requests (D99):
    `Remove topic "<name>" from profile "<profile>" and delete it?` (after the topic
    lookup, so a typo is reported first; TS asks before reading the tenant, D105).
 3. the profile lookup by `--profile` (read last). No match: `Profile "<profile>" not found`.
-4. the §13.4 surgery. When the profile has no ref of the topic, the status line
-   `  Profile <profile> does not reference <name>; it was not changed` and no PUT;
-   otherwise `PUT /v1/mgmt/profile/uuid/<profile_id>`.
+4. the §13.4 surgery on the selected block, after the §13.17 checks (from 8.0: a topic the
+   block does not reference, or that another block still references, is a usage error,
+   exit 2, with nothing written or deleted); then `PUT /v1/mgmt/profile/uuid/<profile_id>`.
 5. `DELETE /v1/mgmt/topic/<topic_id>`: a plain delete, never the force endpoint, so a
    topic another profile (or profile revision) still references is refused with 409
    and kept. Not sent when step 4's PUT failed; that error then ends with the detail
@@ -5170,19 +5192,24 @@ other failure: `Cannot write <path>; check that its directory exists and is writ
 
 ### 13.12 `runtime profiles create`
 
-Argument checks (exit 2), in order (D102, D103):
-1. `--config` with `--no-active` or any policy flag:
-   `--config cannot be combined with --no-active or policy flags`.
-2. Neither `--config` nor a protection flag:
-   `Specify at least one policy flag (for example --prompt-injection block) or --config <path>`.
-3. `--max-inline-latency` (§13.1).
-4. `--dlp-profiles` or `--mask-data-inline` without `--dlp-action`:
-   `--dlp-profiles and --mask-data-inline require --dlp-action`.
+Argument checks (exit 2), in order (D102, D103; from 8.0 per §13.17):
+1. `--config` with `--name`, `--no-active`, any policy flag or `--direction`:
+   `--config cannot be combined with profile write flags or selectors` (TS 7.3.0's text).
+2. Without `--config`, no `--name`: `--name is required unless --config is supplied`.
+3. `--direction` (§13.17).
+4. Neither `--config` nor a protection flag:
+   `Specify at least one policy flag (for example --prompt-injection block) or --config <path>`;
+   with `--direction`, no flag that fills the direction (no flag, or shared settings only;
+   D336): `Directional flag creation requires at least one protection flag, not only shared
+   settings: the service refuses a directional policy with no protection in any direction`.
+5. `--max-inline-latency` (§13.1).
+6. `--dlp-profiles` or `--[no-]mask-data-inline` without `--dlp-action`:
+   `--dlp-profiles and --[no-]mask-data-inline require --dlp-action when creating a profile`.
+7. The flag-built body fails the request schema (§13.17): the D116 text.
 
-Body (validated per §13.2 before the tenant is read):
-- `--config`: the file's object as is, except that its `profile_name` must equal
-  `--name`, else `profile_name in <path> does not match --name <name>` (exit 1; TS
-  ignores `--name`, D103).
+Body (validated per §13.17 before the tenant is read; a mismatch is the D116 text, exit 2):
+- `--config`: the file's object as is; its `profile_name` names the profile (from 8.0;
+  before, it had to equal the then-required `--name`).
 - Otherwise TypeScript's builder (T§9.1, `builders/profile-builder.ts`):
   `{"profile_name": <name>, "active": <false with --no-active, else true>, "policy":
   {"ai-security-profiles": [{"model-type": "default", "model-configuration": <config>}]}}`
@@ -5201,25 +5228,31 @@ Body (validated per §13.2 before the tenant is read):
   {default-url-category: {member: ["malicious"]}, url-detected-action: "block"}`,
   `data-protection: {data-leak-detection: {action: "", mask-data-inline: false, member:
   null}, database-security: null}`, `latency: {inline-timeout-action: "block",
-  max-inline-latency: 5}`, `mask-data-in-storage: false`.
+  max-inline-latency: 5}`, `mask-data-in-storage: false`. From 8.0 the builder is TS
+  7.3.0's: the negative flags write `false`, `enable-full-conversation-inspection` is
+  written when given, and `--direction` builds the directional entry of §13.17 instead.
 
 Requests: the token, then `POST /v1/mgmt/profile`. A 409 answer is the error
-`Profile "<name>" already exists. Use 'profiles update' to modify it.` with the
-`HTTP 409` line (exit 1; never a lookup, D101). Output: stderr
-`  ✓ Profile created: <response profile_id>` (its `profile_name` when the response has
-no `profile_id`); stdout the response in the §7.5/§7.6
-profile detail forms.
+`Profile "<name>" already exists. Use 'profiles update' to modify it.` (the body's
+`profile_name`) with the `HTTP 409` line (exit 1; never a lookup, D101). Output: stderr
+the status line `  Profile created: <response profile_id>` (its `profile_name` when the
+response has no `profile_id`; `  ✓ Profile created: …` before 8.0); stdout the response in
+the §13.17 forms (the detail without the banner).
 
 ### 13.13 `runtime profiles update <nameOrId>`
 
 Argument checks (exit 2), in order:
 1. `--active` with `--no-active`: clap's conflict error.
-2. `--config` with `--name`, `--active`, `--no-active` or a policy flag:
-   `--config cannot be combined with --name, --active, --no-active or policy flags`.
-3. None of `--config`, `--name`, `--active`, `--no-active` or a protection flag:
+2. `--config` with `--name`, `--active`, `--no-active`, a policy flag or a selector:
+   `--config cannot be combined with profile write flags or selectors`.
+3. `--direction`, `--ai-profile-index` (§13.17).
+4. None of `--config`, `--name`, `--active`, `--no-active` or a protection flag:
    `Nothing to update: pass --name, --active, --no-active, a policy flag or --config`
-   (TS PUTs anyway and re-activates the profile, D100).
-4. `--max-inline-latency`; the `--dlp-action` rule of §13.12.
+   (TS PUTs anyway, D100).
+5. `--max-inline-latency`. (`--dlp-profiles` and `--[no-]mask-data-inline` need no
+   `--dlp-action` here from 8.0, §13.17.)
+
+A `--config` file is read and validated (§13.17) before the tenant.
 
 Requests: the token; the profile lookup (§13.2; not found:
 `AISEC_USER_REQUEST_PAYLOAD_ERROR:Profile not found: <nameOrId>`); then
@@ -5229,20 +5262,18 @@ Requests: the token; the profile lookup (§13.2; not found:
   (exit 1, no PUT; TS renames silently, D103).
 - Otherwise `{"profile_name": <--name, else the read name>, "active": <true with
   --active, false with --no-active, else the read value, else true>, "policy": <merged>}`
-  (D100). The merge is TypeScript's `mergeProfilePolicy` (T§10.2) on the read policy,
-  under the §13.4 rules: only `ai-security-profiles[0].model-configuration` changes
-  (created as in §13.4 when absent or empty); `model-protection` and `agent-protection`
-  items merged by `name` (fields of a matching item overwritten, new items appended;
-  `topic-guardrails` untouched); `app-protection` and `latency` field overlays;
-  `data-protection.data-leak-detection` overlaid field by field: `action` from
-  `--dlp-action`, `member` only with `--dlp-profiles`, `mask-data-inline` only with
-  `--mask-data-inline` (TS replaces the object, dropping its DLP profiles, D117);
-  `database-security` merged by `name`; `mask-data-in-storage` set when given. No
-  section defaults are added.
+  (D100). The merge is TypeScript 7.3.0's `mergeProfilePolicy` on the read policy, as
+  §13.17 specifies: one selected entry and block (a legacy profile's single
+  `model-configuration` without selectors, created as in §13.4 when absent or empty), a
+  recursive merge in which `model-protection`, `agent-protection` and
+  `database-security` items merge by `name` (`topic-guardrails` untouched) and
+  `data-leak-detection` changes only the fields given (D117 retired), the shared settings
+  to the entry's `model-configuration`, everything else kept. No section defaults are
+  added. A layout refusal is a usage error after the read, nothing written.
 
-The body is validated (§13.2) after the read and before the PUT. Output: stderr
-`  ✓ Profile updated: <response profile_id>`; stdout the response in the §7.5/§7.6
-detail forms.
+The body is validated (§13.17) after the read and before the PUT (a mismatch: the D116
+text, exit 2). Output: stderr the status line `  Profile updated: <response profile_id>`
+(`  ✓ Profile updated: …` before 8.0); stdout the response in the §13.17 forms.
 
 ### 13.14 `runtime profiles delete|rm <nameOrId>`
 
@@ -5375,15 +5406,233 @@ Further rules (resolved while implementing, step 3):
 |---|---|---|
 | the `topics create` constraint texts (§13.5); `--intent must be "allow" or "block", got: "<v>"`; `AISEC_USER_REQUEST_PAYLOAD_ERROR:Invalid topic_id: <id>`; `--updated-by <email> is required with --force` | 2 | §13.5–§13.8, §13.14 |
 | `refusing to delete topic <id> …`, `refusing to revert topic "<name>" …`, `refusing to delete profile "<x>" …`, `refusing to delete profile revisions …` (each `without --force in non-interactive mode`) | 2 | §13.7, §13.9, §13.14, §13.15 |
-| `--max-inline-latency must be a non-negative integer`, `--dlp-profiles and --mask-data-inline require --dlp-action`, `Specify at least one policy flag …`, `--config cannot be combined with …`, `Nothing to update: …`, `--rate must be a positive integer`, `--concurrency must be an integer from 1 to 32`, `--dry-run cannot be combined with --force`, `--updated-by <email> must not be blank`, `--updated-by <email> must not contain control characters` | 2 | §13.7, §13.10–§13.15 |
-| `Cannot read <path> (…)`, `<path> is not valid UTF-8`, `<path> is not valid JSON`, `<path> must contain a JSON object`, `profile_name in <path> …`, the CSV texts (§13.10), `AISEC_USER_REQUEST_PAYLOAD_ERROR:Request body for <METHOD> <path> did not match schema` | 1 | §13.2, §13.10, §13.12, §13.13 |
+| `--max-inline-latency must be a non-negative integer`, `--dlp-profiles and --[no-]mask-data-inline require --dlp-action when creating a profile`, `Specify at least one policy flag …`, `--config cannot be combined with profile write flags or selectors`, `--name is required unless --config is supplied`, `Nothing to update: …`, the §13.17 selector and layout texts (the layout ones after the read), the D116 text of a profile create or update body, `--rate must be a positive integer`, `--concurrency must be an integer from 1 to 32`, `--dry-run cannot be combined with --force`, `--updated-by <email> must not be blank`, `--updated-by <email> must not contain control characters` | 2 | §13.7, §13.10–§13.15 |
+| `Cannot read <path> (…)`, `<path> is not valid UTF-8`, `<path> is not valid JSON`, `<path> must contain a JSON object`, `profile_name in <path> …`, the CSV texts (§13.10), `AISEC_USER_REQUEST_PAYLOAD_ERROR:Request body for <METHOD> <path> did not match schema` (except a profile create or update body, exit 2, §13.17) | 1 | §13.2, §13.10, §13.12, §13.13 |
 | `Topic "<name>" not found. Create it first with "topics create".`, `Topic "<name>" not found`, `Profile "<p>" not found`, `AISEC_USER_REQUEST_PAYLOAD_ERROR:Profile not found: <x>`, `Profile <p> has no profile_id`, `AISEC_USER_REQUEST_PAYLOAD_ERROR:Invalid profile_id: <id>` and `…Invalid topic_id: <id>` (`apply`, `revert`, server ids), `Existing topic '<name>' has no topic_id`, `API response missing topic_id`, `Profile "<name>" already exists. Use 'profiles update' to modify it.` (TS texts) | 1 | §13.5–§13.14 |
 | `Outcome unknown: the <thing> may have been <done>.`, `Outcome: the <thing> was <done>, but the response could not be read.`, `Profile <p> was updated (<name> removed); the topic was not deleted.`, `The topic was not deleted.`, `Scans: <s> of <n> sent, <c> completed; no metrics were computed.`, `CSV row <n>` (detail lines) | 1 | §13.2, §13.9, §13.10 |
 | `<path> already exists; choose another --output-file`, `Cannot write <path>; check that its directory exists and is writable` | 1 | §13.11 |
 | `The profile list changed while waiting for confirmation; nothing was deleted. Run the command again.` | 1 | §13.15 |
 | `  ℹ Aborted` (info), `  Cancelled; nothing was changed.` (status) | 0 / 130 / 143 | §13.2 |
 | `Interrupted; the profile was updated; the topic was not deleted`, `Interrupted; the profile was updated; the topic may already have been deleted (outcome unknown)`, `Interrupted; <s> of <n> scans were sent; no metrics were computed` | 130 / 143 | §13.2, §13.10 |
-| `  Profile <p> already has <name> with intent <intent>; nothing was written`, `  Profile <p> does not reference <name>; it was not changed`, `  Warning: imbalanced set: …` (status lines, quiet-suppressed) | 0 | §13.8–§13.10 |
+| `  Profile <p> already has <name> with intent <intent>; nothing was written`, `  Profile created|updated: <id>` (8.0), `  Warning: imbalanced set: …` (status lines, quiet-suppressed; `does not reference …; it was not changed` until 8.0) | 0 | §13.8–§13.13 |
+
+### 13.17 Directional security profiles (8.0, TypeScript 7.3.0)
+
+TypeScript 7.3.0 (the 8.0 reference, §1) adds directional security profiles to `runtime
+profiles create|update` and `runtime topics apply|revert`, on TS SDK 0.35.0. The specs are
+its `docs-site/docs/cli/runtime/profiles.md`, `src/airs/profile-policy.ts`,
+`src/cli/builders/profile-builder.ts`, `src/cli/commands/runtime.ts`, `topics-apply.ts`
+and `topics-revert.ts`, and its `tests/integration/directional-security-profiles.spec.ts`,
+whose scenarios run on both CLIs in `tests/parity_runtime_directional.rs`. The Rust form is
+`src/profile_policy.rs` (layout rules, selector, recursive merge) and `src/policy.rs`
+(builders, merge, topic surgery). **Status: accepted live** (8.0 B7, 2026-10-22, against
+`redtail-prod`; `docs/research/live-directional-profiles.md`, MILESTONES 8.0): flag creation
+of each of the four directions (with D335), a `--config` create, a protection edit of each
+direction, a shared-settings edit, a topic applied and reverted in each direction, backup,
+delete, restore and `--on-conflict verify`. Supported for profiles with a single AI entry.
+scm-sdk 0.2.4 still marks directional live acceptance unverified on its side. The live
+service applies rules the request schema does not express, which the CLI does not check
+before sending except D336 (a refusal is the service's HTTP 400, exit 1, with no response
+body shown): every directional entry needs all four direction keys (D335 builds them on a
+flag create; a `--config` body must hold them), a policy whose directions are all empty is
+refused (a flag create that would send one is refused locally, D336; a `--config` body is
+sent), `response` refuses `prompt-injection`, and `toxic-content` takes `block` or `allow`
+per level. Not exercised live: several AI entries (`--ai-profile-index`), DLP blocks inside a
+direction, and the runtime report's `Protection configurations` column; the offline contract
+below covers them. Every write that changes a profile without a `dlp_tenant_id` (below)
+has an unknown effect on the stored DLP tenant binding.
+
+**The two layouts.** A policy holds AI entries (`ai-security-profiles[]`).
+- A **legacy** entry keeps its protections (`model-protection`, `app-protection`,
+  `agent-protection`, `data-protection`) and its shared settings in `model-configuration`.
+- A **directional** entry is one whose `content-type-mode` is `per_content_type` or that
+  has a `content-type-configurations` key (any value). Its protections live per direction
+  in `content-type-configurations` (`prompt`, `response`, `tool-call`, `tool-response`;
+  each optional, unknown keys kept); its `model-configuration` holds the shared settings
+  (`latency`, `mask-data-in-storage`, `enable-full-conversation-inspection`). Protection
+  blocks left in a directional entry's `model-configuration` are kept but inactive.
+- A **protection location** is one block: an entry's `model-configuration` (active only for
+  a legacy entry) or one direction (always active). Locations are listed by entry, the
+  `model-configuration` first, then the four known directions in that order, then any
+  other key. Non-object entries, blocks and directions are skipped.
+
+**Selectors** (usage errors, exit 2, before the tenant): `--direction <direction>` must be
+`prompt`, `response`, `tool-call` or `tool-response`, else `--direction must be prompt,
+response, tool-call, or tool-response`; `--ai-profile-index <n>` must be decimal digits
+(zero-based, at most 2^53 − 1), else `--ai-profile-index must be a nonnegative integer`
+(D332). `profiles create` takes `--direction` only (`--ai-profile-index` is clap's
+unknown-argument error, D1).
+
+**Selecting an entry and a block** (TS `selectAiProfile`, `selectProfileProtections`). Every
+refusal below is a usage error (exit 2, as in 7.3.0) after the profile read, with nothing
+written:
+1. Several entries without `--ai-profile-index`: `Multiple AI profile entries: specify
+   --ai-profile-index or use --config`. An index without an entry (or a non-object entry):
+   `--ai-profile-index does not identify an existing AI profile entry`. An absent or empty
+   list without an index gets one `{"model-type": "default"}` entry (D115).
+2. A directional entry needs `--direction` (`Directional protection edits require
+   --direction`, even with one direction); a mode other than `per_content_type` is
+   refused (`Unknown content-type-mode: use a complete --config replacement`); the
+   direction must exist (`Selected direction is absent; add it with a complete --config
+   replacement before editing protections or topics`), except for a shared-only edit,
+   which checks the layout and inserts nothing.
+3. A legacy entry refuses a direction (`A legacy profile cannot be converted by
+   --direction; use a complete --config replacement`) and any `content-type-mode` key
+   (the unknown-mode text). The block is its `model-configuration` (created when absent).
+
+**`profiles create`.**
+- `--name` is optional (`Profile name (required unless --config is supplied)`); without
+  `--config` it is required (`--name is required unless --config is supplied`).
+- `--config <path>` is a complete JSON body (`Complete JSON profile configuration;
+  exclusive with write flags`) whose `profile_name` names the profile; it is exclusive
+  with `--name`, `--no-active`, every policy flag and `--direction` (`--config cannot be
+  combined with profile write flags or selectors`, TS 7.3.0's text; D103).
+- With `--direction`, the flags build one directional entry: `{"model-type": "default",
+  "content-type-mode": "per_content_type", "model-configuration": <shared settings>,
+  "content-type-configurations": {<direction>: <protections>, <each other known direction>:
+  {}}}`, no section defaults, the malicious-code item named `malicious-code`. The three
+  directions the flags do not fill are written as empty objects (D335: the live service
+  refuses a directional entry without all four keys; TS 7.3.0 writes the selected direction
+  only), so a later flag edit of any direction finds it present. Without a flag that fills
+  the direction (no flag, or only the shared settings `--max-inline-latency`,
+  `--inline-timeout-action`, `--[no-]mask-data-in-storage` and
+  `--[no-]enable-full-conversation-inspection`), the create is refused before the tenant and
+  OAuth (exit 2, D336): `Directional flag creation requires at least one protection flag,
+  not only shared settings: the service refuses a directional policy with no protection in
+  any direction`. TS 7.3.0 refuses only the flagless create (`… requires at least one
+  protection or shared setting; use --config for an empty policy`) and sends a shared-only
+  one, which the service refuses; an empty policy through `--config` is refused by the
+  service too.
+- Without `--direction`, the legacy builder of §13.12 (`malicious-code-detection`, the
+  section defaults).
+- Every body is validated before the tenant (below).
+
+**`profiles update`.** `--config <path>` is a complete replacement (`Complete JSON
+replacement; exclusive with write flags`), exclusive with `--name`, `--active`,
+`--no-active`, every policy flag and both selectors (the conflict text above); otherwise
+the flags are merged (TS 7.3.0 `mergeProfilePolicy`):
+- exactly one entry is selected (above); the protection flags go to its selected block,
+  the shared settings (`--max-inline-latency`, `--inline-timeout-action`,
+  `--[no-]mask-data-in-storage`, `--[no-]enable-full-conversation-inspection`) to its
+  `model-configuration` (created when absent), so a shared-only edit needs no direction
+  and keeps every direction;
+- the merge is recursive (TS `mergeSettings`): `model-protection`, `agent-protection` and
+  `database-security` items merge by `name` (a match is merged recursively, keeping its
+  severities, topic lists and unknown keys; a new name is appended; a name that occurs
+  more than once is refused: `Ambiguous detector identity: <name>`); objects merge
+  recursively; other values replace. A `malicious-code-protection` without a `name` gets
+  `malicious-code` (also on a legacy entry: the update merge path), an existing name is
+  kept;
+- every other entry, direction, detector and key is kept as read; an unknown mode is kept
+  by a shared-only edit;
+- explicit `false` is written (`--no-mask-data-inline`, `--no-mask-data-in-storage`,
+  `--no-enable-full-conversation-inspection`); of a positive/negative pair the last one
+  given wins (clap `overrides_with`, commander's rule);
+- `--dlp-profiles` and `--[no-]mask-data-inline` need no `--dlp-action` on update: they
+  overlay their fields on the block's `data-leak-detection` (D117 retired);
+- `--active` changes only when given (D100).
+
+**Flag presence** follows TS 7.3.0 `hasAnyProtectionFlag`: the text flags count when
+non-empty, except `--dlp-action` and `--dlp-profiles`, which count when given at all (an
+empty `--dlp-action ""` writes `"action": ""`; an empty `--dlp-profiles ""` writes no
+`member`); the boolean pairs count in both forms.
+
+**Request validation.** Every profile body is validated with the TypeScript 0.35.0 request
+root that scm-sdk 0.2.4's create and update also apply,
+`typescript:0.35.0:CreateSecurityProfileRequestSchema` (`validation::parse`, `Mode::Request`;
+the model `parse` keeps its frozen 0.34.0 binding, §15.25). On `profiles create|update` a
+mismatch is the D116 text as a usage error (exit 2): before the tenant for a `--config`
+file and a flag-built create body (`PUT /v1/mgmt/profile/uuid/<profile_id>` names an
+update file's request before the lookup, the id when the argument is one), after the read
+for a merged update body. `topics apply|revert` validate their PUT with the same root and
+keep exit 1 (TS reports their schema failure as an operational error). The transfer
+commands validate with the same roots (`valid_profile_body`, the Basic fallback's
+`typescript:0.35.0:PolicySchema`), and a restore checks each mapped body again with the
+request root just before its write (`policy::request_body`; a mismatch is the stop text,
+nothing sent), never with the model's 0.34.0 `parse` (defence in depth: planning already checks
+the source body with the same root, so no tested body reaches this refusal).
+
+**Output** (TS 7.3.0 `emitDetail`). `profiles create|update` print the status line
+`  Profile created|updated: <id>` (dim, stderr, quiet-suppressed; D106) and the response:
+pretty is the §7.6 detail **without** the runtime banner, json the §7.5 object, table the
+`Key │ Value` detail (Rust-only, D94); `yaml` stays refused (D50). The format is
+`--output`, else the tenant's `defaultOutput`, else pretty (D94). Every profile view
+(`get`, `list`, `create`, `update`) gains:
+- json and table: `dlpTenantId` after `policy`, only when the record carries
+  `dlp_tenant_id` (a GET may omit it), with the value the record carries (an unexpected
+  `null` or number included, D334);
+- pretty detail: `DLP tenant  <id>` after `Status` (a value that is not a string as its
+  compact JSON, D334), and `Protection locations
+  AI[<i>] <model-type, else unspecified> / <direction|legacy>[, …]` (the active locations)
+  before `Policy`;
+- the printed policy in TypeScript SDK 0.35.0's key order: scm-sdk 0.2.4 serialises an AI
+  entry and `model-configuration` in its 0.34.0 field order, so the views reorder those
+  two objects (`model-type, content-type, content-type-mode, content-type-configurations,
+  model-configuration`; `data-protection, app-protection, model-protection,
+  agent-protection, mask-data-in-storage, latency, enable-full-conversation-inspection`),
+  the rest as serialised (D35).
+
+**`topics apply|revert`** take `--direction` and `--ai-profile-index` (`AI profile entry
+index (zero-based)`) and act on the selected block (the rules above, with the direction
+required to exist); the §13.4 surgery is otherwise unchanged. A block with more than one
+`topic-guardrails` item is refused (`Ambiguous topic-guardrails identity in selected
+protection section`). `apply` keeps every other topic, block and direction. `revert`
+refuses, in this order, with nothing written or deleted:
+1. with a selector, its layout checks;
+2. no ref of the topic in scope (the selected block; without a selector, every active
+   block): `Topic "<name>" is not assigned to the selected protection section` (also for a
+   legacy profile; D99);
+3. with a selector, a ref of the topic in any other block (another direction, another
+   entry, or a retained inactive `model-configuration`): `Topic is referenced in another
+   direction or AI entry; detach those references before reverting and deleting`;
+4. the selection of the write itself (several entries, or a directional entry, without a
+   selector).
+The refs counted are the §13.4 identity's (D333). The delete stays the plain delete with
+the 0.4.1 409 rule (D99).
+
+**Reports and transfer.**
+- `runtime report`: the profile table gains `Protection configurations` (between `Storage
+  masking` and `Last modified (UTC)`): one `AI[<i>] <model-type> / <direction|legacy>:
+  <sections>` per active location, joined by `; `, the sections being those of
+  `model-protection`, `agent-protection`, `app-protection`, `data-protection` that hold a
+  non-empty object or array (`No modeled protection sections returned` when none,
+  `Unknown` when there is no location). Timeout actions and storage masking still read each
+  entry's `model-configuration`.
+- `runtime profiles backup|restore`: the DLP references and the Basic fallback walk every
+  location (directions and retained blocks, the reference paths naming the direction); the
+  canonical `database-security: null` and the comparison's server-default allowances apply
+  to legacy entries only, so directions compare strictly; topic references were already
+  found anywhere in the policy.
+
+**The scm-sdk 0.2.4 fields** (§15.25). The CLI builds and reads JSON documents and types
+them with the SDK models only at its edges, so every field keeps the three states the SDK
+keeps (`Optional::Unset`, an explicit value, and an unexpected value in the extensions):
+- an omitted setting stays omitted: no flag default is written (a boolean pair writes only
+  when one of its forms is given), and the merge never inserts a key the read lacked;
+  an explicit `false` is written and kept (`Optional::Value(false)`);
+- `dlp_tenant_id` is a string. A `--config` body sends it as written; a flag update sends
+  TS 7.3.0's `{profile_name, active, policy}` and so no `dlp_tenant_id`; a restore never
+  sends the source's (a tenant-bound identifier, TS's body); a backup keeps the record's.
+  So every CLI write that changes a profile leaves it out unless a `--config` file holds it:
+  a flag `profiles update`, `topics apply|revert`, a restore (create and overwrite) and a
+  `profiles update --config` whose file omits the key; TS 7.3.0 does the same, and no read
+  returns the field, so the CLI cannot carry it over. Observed live (B7): no `get` or `list`
+  answer carries `dlp_tenant_id`; a create or PUT answer carries the value sent, and
+  `"none"` when the body omits it. The answer reports `none`; the effect on the stored
+  binding is unknown (the evidence cannot tell a cleared binding from an answer that only
+  reflects the request; `docs/research/live-directional-profiles.md` records the open
+  question and the test that would decide it). This applies to legacy profiles too. The
+  CLI prints each answer as sent;
+- `content-type-mode` is free text (`per_content_type` is the one observed value); the four
+  known directions are independently optional in the schema (the live service requires all
+  four keys, D335) and an unknown direction key is kept with its value by every read,
+  merge, backup and restore; no read, merge, backup or restore synthesizes a direction (a
+  flag create writes the three it does not fill as empty objects, D335);
+- an answer holding an unexpected value of a new field is printed and backed up as sent,
+  and a write that would send it back fails the request schema (D334).
+
+**Exit codes.** 2 for every check above (before the tenant, or after the read for the
+layout refusals and a merged body), 1 for the rest as in §13.3.
 
 ## 14. M5 bulk scanning (0.5)
 
@@ -8238,6 +8487,168 @@ before, G25 stays closed, G71 is unchanged (AgentGuard is byte-identical).
     camelCase form inside `connection_params` comes from neither; rule 7 still reads its secret-named keys. Rejected:
     camelCase aliases for every nested rule, which would describe a shape no answer or normalised document has.
 
+### 15.25 scm-sdk 0.2.4, the TypeScript 0.35.0 overlay (8.0)
+
+8.0 adopts scm-sdk 0.2.4, the additive patch release that adds the final TypeScript SDK,
+0.35.0 (`780c985`), as versioned schema roots (`typescript:0.35.0:`) beside the unchanged
+0.34.0 baseline (the SDK's `docs/DIRECTIONAL_PROFILES.md`, its offline example
+`examples/directional_profiles.rs` and its CHANGELOG).
+
+**The pin** (adopted 2026-10-22; 0.2.4 was published on crates.io at 2026-10-22T17:49Z
+from the annotated tag `v0.2.4`, commit `6f18529a47cc273feca1000af6e4fc0d96da757e`):
+`scm = { package = "scm-sdk", version = "=0.2.4", default-features = false, features = ["reqwest-transport", "scan", "management", "red-team", "dlp", "model-security", "gateway", "agentguard"] }`.
+The features are unchanged; `management` (the profile clients) was already enabled.
+`cargo update -p scm-sdk --precise 0.2.4` changed only the `scm-sdk` entry of
+`Cargo.lock`: version 0.2.4, the crates.io source and checksum
+`533294fe977e26e251e01dd2de64a896aa22ce45e97ac6264a0df6af879edd55`. Requests carry
+`PAN-AIRS/0.2.4-rust-sdk` (§2.9, README, `tests/debug.rs`, `tests/parity_debug.rs`,
+`tests/gateway_inventory.rs`). Before publication the tree built the exact Forgejo commit
+`4825616ccf4c29272aff9a1ec3dcffb8b2e91535` of the overlay (branch
+`feat/typescript-035-parity`, crate version 0.2.3, user agent `PAN-AIRS/0.2.3-rust-sdk`) as
+a temporary git dependency; that line is gone, so nothing blocks `cargo publish` on it.
+
+**The published crate against `4825616`** (checked 2026-10-22). The downloaded
+`scm-sdk-0.2.4.crate` (the checksum above) names `6f18529` in `.cargo_vcs_info.json`; its
+`src/**`, `examples/**`, `LICENSE` and `NOTICE` are byte-identical to `crates/scm-sdk` at
+`v0.2.4`, and its `Cargo.toml.orig` is the tag's manifest. Between `4825616` and `v0.2.4`,
+`crates/scm-sdk` changes only the manifest's `version` (0.2.3 → 0.2.4); the seven commits
+between them change release documentation, receipts and tests outside the crate. So the
+swap changes no behaviour of this CLI except the user agent; the full definition of done
+ran again on it.
+
+**What 0.2.4 changes for this CLI** (measured on the 8.0 tree):
+1. **The diff.** Against tag `v0.2.3` (`14a6754`) the crate changes only
+   `src/airs/management/profiles.rs` (create and update validate their body with
+   `typescript:0.35.0:CreateSecurityProfileRequestSchema` before authentication),
+   `src/models/{generated,management}.rs` (the two new types and five fields),
+   `src/validation/{schema_graph,semantics}.json` (the versioned roots),
+   `src/fixtures/model-regressions.json`, its tests and the new offline example. The scan,
+   red team, DLP, model-security, gateway and AgentGuard modules, the streaming and SSE
+   decoder, the transport, the engine and the authentication are unchanged.
+2. **Types.** `ContentTypeConfiguration` (`data-protection`, `app-protection`,
+   `model-protection`, `agent-protection`) and `ContentTypeConfigurations` (`prompt`,
+   `response`, `tool-call`, `tool-response`, unknown directions kept); `AiSecurityProfile`
+   gains `content_type_mode` and `content_type_configurations`, `ModelConfiguration`
+   `enable_full_conversation_inspection`, `SecurityProfile` and
+   `CreateSecurityProfileRequest` `dlp_tenant_id`, all `Optional<T>`. The CLI builds no
+   profile model with a struct literal, so the tree compiled unchanged. How the CLI carries
+   them is §13.17 ("The scm-sdk 0.2.4 fields").
+3. **Validation.** Existing model `parse` and `build_validated` methods keep their 0.34.0
+   binding; the operation paths validate with the 0.35.0 root, which refuses an explicit
+   `null` or a wrong type for the new fields and known directions, also through raw
+   extensions. The CLI validates every profile body with the same root itself
+   (`policy::request_body`, `validation::parse`), before the tenant where it can, so the
+   SDK's own refusal is never what a user sees (§13.17). Responses keep 0.34.0's tolerant
+   binding in both response modes: unknown fields, directions and modes and invalid values
+   of the new fields survive in extensions (D334).
+4. **Response defaults (G10).** No schema reachable from a profile carries a default except
+   the list's `ai_profiles: []` (also through the versioned alias `s_ts035_s009653`; the
+   graph walked from `SecurityProfileSchema`, `PolicySchema`, `AiSecurityProfileSchema`,
+   `ModelConfigurationSchema`, `CreateSecurityProfileRequestSchema` and their
+   `typescript:0.35.0:` roots reaches no other `ZodDefault`), and an absent list already
+   reads as empty, so nothing printed depends on it. Still, from the 0.2.4 gap closure
+   **every profile read** runs without the defaults, on every page: `profiles list` (one
+   page: `runtime::options`, the 60 s budget `None` gave), `list --all`, `get` and its
+   walks (`get_by_name`, `--all-versions`), the `profiles update|delete` lookups, the
+   profile read of `topics apply|revert` and the `profiles cleanup` listings
+   (`commands::profile_walk_options`; the deadlines are as before: one 300 s deadline
+   shared by the token and the walk for `list --all`, `get` and the update and delete
+   lookups, while `profiles cleanup` keeps its token's deadline and gives each listing, the
+   first and the re-check after the confirmation, its own), plus the backup (§18.15),
+   restore (§18.16) and report (§18.13) reads that already did. Every profile write
+   (`profiles create|update`, the `topics apply|revert` PUTs, whose answers are discarded,
+   and the restore's writes) builds per attempt
+   `runtime::request_options(SINGLE_REQUEST_BUDGET)` (no defaults, the same 60 s; one
+   attempt and the single 401 replay unchanged, D95), so one rule covers every profile
+   PUT and POST. Excluded with reason: the profile and topic deletes (their answers are
+   neither printed nor kept), the topic walks (their `examples: []` default is
+   TypeScript's output, G27) and the DLP reads (no default is reachable, §16 "G10 does not
+   apply"). No output can show the option while no profile default is reachable, so the
+   evidence is `src/commands/mod.rs::tests::profile_reads_and_writes_skip_the_response_defaults`
+   (the options, and the SDK half: the option keeps an absent `ai_profiles` absent and a
+   directional record reads identically in both modes), the call-site guard
+   `src/commands/mod.rs::tests::profile_call_sites_use_the_no_default_options` (no profile
+   read or write in the profile commands passes `None` or the defaulted `walk_options()`)
+   and the multi-page tests
+   `tests/management.rs::sdk_0_2_4_pages` and
+   `tests/runtime_transfer.rs::backup::directional_records_are_stored_losslessly_on_every_page`.
+   **Faithful output.** `profiles backup` is the lossless path: it stores each record as
+   the page carried it (unknown top-level keys, `csp_id`, `tsg_id`, explicit `null`s
+   included). The `get`, `list`, `create` and `update` JSON stays the §7.5 projection,
+   TypeScript's output: its `policy` is the complete SDK model with its extensions and
+   `dlpTenantId` falls back to the extension value (D334), but unknown top-level keys are
+   dropped there by contract. G25 is unchanged: response ids, timestamps, unknown enum
+   strings and object keys stay accepted, and the CLI adds no UUID or date check of a
+   response document.
+5. **Dependencies.** 0.2.4 adds no dependency and changes no feature or MSRV (1.89). Before
+   the swap, following the SDK's RUSTSEC-2026-0382/0383 advisory for downstream lockfiles,
+   `Cargo.lock` moved `rustls-webpki` 0.103.15 → 0.103.16 and `webpki-root-certs` 1.0.5 →
+   1.0.10, the versions of the SDK's qualified lockfile. The audit of the resolved graph
+   (2026-10-22, RustSec database `640bf5a9`): `cargo audit` reports no vulnerability on
+   the 236 locked packages (the 1.0 lockfile, with 0.103.15 and 1.0.5, reports exactly
+   those two advisories), and `cargo deny check advisories sources` passes (crates.io the
+   only source; no git dependency is left). This repository configures no `deny.toml` or
+   audit job; the policy it keeps is exact pins for new direct dependencies and no
+   `serde_json/preserve_order`. Against the SDK's own qualified `Cargo.lock`, the CLI
+   resolves every shared package at the same version except `schannel` (Windows only,
+   0.1.30 here, 0.1.29 there).
+6. **Status.** The SDK marks directional live acceptance unverified. This CLI's B7 live run
+   (2026-10-22, `redtail-prod`) accepted every directional create, edit, topic, backup and
+   restore operation on all four directions once the flag create wrote all four direction
+   keys (D335); the service rules it found are listed in §13.17 and
+   `docs/research/live-directional-profiles.md`.
+
+**Workarounds, decided on 0.2.4** (both kept; neither is an SDK change):
+- **The 0.35.0 request root.** 0.2.4's documentation (`DIRECTIONAL_PROFILES.md`,
+  "Construction and current request validation") keeps the model `parse` and
+  `build_validated` methods on their historical binding, and directs standalone callers to
+  `validation::parse` with `typescript:0.35.0:<SchemaName>`. The CLI therefore keeps
+  validating with the versioned root: `CreateSecurityProfileRequest::parse` alone accepts a
+  `null` `dlp_tenant_id` that the create call then refuses
+  (`src/policy.rs::tests::request_bodies_keep_the_directional_fields_as_given`). The new
+  named schemas (`ContentTypeConfigurationSchema`, `ContentTypeConfigurationsSchema`) are
+  reached through the request root and need no separate call.
+- **The printed key order.** 0.2.4 serialises an AI entry and `model-configuration` in
+  0.34.0 field order (the new fields last), where TypeScript SDK 0.35.0 prints
+  `content-type-mode` and `content-type-configurations` before `model-configuration` and
+  the protections first. The views keep reordering those two objects; the reorder moves
+  keys only and drops none (`src/views.rs::tests::the_printed_policy_reorders_keys_and_drops_nothing`).
+
+**Streaming and SSE.** The SDK's SSE decoder (`scm::streaming::sse`) and the typed
+`ContractStream` date from 0.2.0 and are unchanged by 0.2.4. The only streamed responses
+this CLI reads are `gateway inference chat|responses --stream` (§19.14), which already
+consume `create_chat_completion_stream` and `create_response_stream`; the CLI keeps only
+rendering, secret withholding and interruption. No command parses SSE or another streamed
+format by hand (`DirectTransport` hands the SDK raw body chunks; `model-security install
+--fetch-uv` reads a download, not an event stream), so nothing moved.
+
+**Cumulative migrations.** The CLI adopted 0.2.3 in 1.0 (§15.24: the Vertex AI, N8N and
+realtime values, the client-session config, the basic-auth and audio fields, with their
+unknown-value fallbacks; `profiling_status` is reconciled without a flag, choice 4);
+`targets error-logs --offset` and `--search` stay usage errors before the tenant (D300).
+0.2.4 adds nothing to reconcile there. Pinned by the 0.2.4 gap closure:
+- `profiling_status`: the CLI sends no profiling or status filter, so nothing is
+  translated; answers carrying `NOT_STARTED`, `IN_PROGRESS`, `COMPLETED`, `FAILED` or an
+  unknown value are read by `targets list|get|backup`, and no view or backup prints the
+  field (the TS projections, §15.18)
+  (`tests/redteam_reads.rs::management_0_86::every_profiling_status_is_read_and_never_sent`,
+  `tests/redteam_reports.rs::management_0_86::profiling_statuses_are_accepted_and_unknown_unions_fail_the_row`).
+- The 0.86.0 unions are closed in the response schema on both SDKs: a `multi_turn_config`
+  type or a `target_connection_config` shape that is no known branch fails the read (D38
+  text, exit 1; a failed row in a backup), as TypeScript does; scm-sdk's typed `Unknown`
+  fallback applies only to documents the schema accepts. The CLI keeps that check (the
+  brief's retained required-field and type checks) and opens no gap: a future vendor branch
+  needs an SDK release (`tests/parity_redteam_reads.rs::parity::unknown_union_shapes_are_refused_like_typescript`,
+  `tests/redteam_reads.rs::management_0_86::unknown_union_shapes_fail_the_response_schema`).
+- `targets error-logs --skip` (the API name) is no flag: clap's usage error (exit 2, D1)
+  before the tenant (`tests/redteam_reads.rs::contract::an_error_log_skip_is_a_usage_error_before_the_tenant`).
+- The `api.apps` defaults stay and no endpoint is rewritten: the CLI's red team and
+  management defaults equal scm-sdk's, and a tenant's `api.sase` endpoint is used as
+  written (`src/clients.rs::tests::red_team_endpoints_are_the_defaults_or_the_tenant_values_unchanged`).
+- `serde_json` is built without `preserve_order` (`cargo tree -e features -i serde_json`:
+  `default`, `raw_value`, `std`), guarded by
+  `src/json.rs::tests::serde_json_is_built_without_preserve_order`.
+
 ## 16. M6b DLP (0.7)
 
 The specs this section is derived from are `docs/research/ts-dlp.md` (cited as **TD§n**),
@@ -8701,7 +9112,7 @@ field is set; a row without `id` omits its id line and a missing `name` prints a
 | profiles | `Data Profiles` | `  <id>\n    <name>  <type>  <profile_status>[ <profile_type>][ v<version>]` |
 | dictionaries | `Data Dictionaries` | `  <id>\n    <name>  <type>  <status>[ <keywords.length> kw][ v<version>]` |
 
-**Table lists** (TS `common.ts:126-139`, the §2.7 table): columns `ID, Name, Type, Direction,
+**Table lists** (TS `common.ts:127-140`, the §2.7 table): columns `ID, Name, Type, Direction,
 Severity, Version` (filtering profiles), `ID, Name, Type, Status, Technique, Version` (patterns),
 `ID, Name, Type, Profile Type, Status, Version` (profiles), `ID, Name, Type, Status, Keywords,
 Version` (dictionaries; `Keywords` is the count, empty without `--keywords`). Empty: nothing on
@@ -10118,7 +10529,7 @@ message).
   `terminal_safe`, no trailing blank line; MI§3). Without `--url-file` stderr adds the dim hint
   `  The index credential is withheld; pass --url-file <path> to save the full URL in a new private file.`
   (quiet-suppressed).
-- json: `{"url": "<withheld form>", "expiresAt": "<expires_at>"}` (TS's service shape, `types.ts:911-914`).
+- json: `{"url": "<withheld form>", "expiresAt": "<expires_at>"}` (TS's service shape, `types.ts:915-918`).
 - table: `Key │ Value` with the rows `url` and `expiresAt`.
 TS prints the full URL in its only (pretty) layout, also under `--quiet` (MI§3).
 
@@ -11369,7 +11780,8 @@ Scan content never reaches stderr, an error, the debug log or a summary.
 
 The TypeScript collector and renderer (`src/reports/runtime.ts`, `render.ts`; TR§5) are ported unchanged except for
 the format (D155), the debug refusal (D156), G7, G27 (D214), the destination parent check (D214) and the sequential
-source order (choice 17). The report is already safe in TypeScript (aggregates only, no-clobber, 0600, CSP).
+source order (choice 17). The report is already safe in TypeScript (aggregates only, no-clobber, 0600, CSP). From 8.0 the profile
+table has TS 7.3.0's `Protection configurations` column (§13.17).
 
 **Argument checks** (exit 2, in TS order, before the tenant and any request):
 1. `--debug` (debug policy `refused`): `Disable --debug for environment reports to avoid persisting sensitive traffic content`
@@ -11566,7 +11978,9 @@ the text ends `; verify destination state before retrying`, choice 57). Then TS'
 topic, DLP mapping, Basic fallback and `verify` rules and every TS refusal text (TR§7.3 steps 6–11; names through
 `terminal_safe`). `sameTopic` compares `description`, `examples` and `active ?? true`, with an absent `examples` equal to
 `[]` (choice 24; TS compares the defaulted values). `compareRuntimePolicies` (`pol.ts:12-161`) is ported verbatim (the
-directional comparison and the ten observed server defaults, recorded as `serverDefaults`). Each Basic fallback first
+directional comparison and the ten observed server defaults, recorded as `serverDefaults`; from 8.0 the allowances
+apply to legacy AI entries only, and the DLP walk, the Basic fallback and the canonical policy cover directional profiles,
+§13.17). Each Basic fallback first
 prints `  ⚠ DLP protection change: <profile> will use Basic detection instead of <names>. Custom rules are not preserved.`
 (stderr, never suppressed, TS).
 
@@ -11678,11 +12092,11 @@ Every behaviour above gets an executable test (`tests/runtime_extras_*.rs`, `tes
 
 | TypeScript spec | Rust acceptance tests (adjusted by the §12 rows) |
 |---|---|
-| `unit/airs/management.spec.ts:1071-1117` | api-key list projections with schema-valid wire records (`creation_ts`, `expiration`, D207) and `nextOffset`; `create` sends the config unchanged (one POST, D95); `regenerate(id, body)`; `delete(name, updatedBy)` acknowledges with the fixed text (D208) |
-| `management.spec.ts:1123-1170` | customer-app names and ids (`customer_appId`, D207); `get` by name; `update(id, body)` prints the updated name; `delete(name, updatedBy)` names the argument (D208) |
-| `management.spec.ts:1176-1194` | deployment profiles as rows; `--unactivated` sends `?unactivated=true` |
-| `management.spec.ts:1200-1225` | `scan-logs query` sends nothing (not even the token) and exits 1 with the §18.11 text |
-| `management.spec.ts:1227-1440` | consumption: the app id from the overview, both reads with `{appId, appName, timeInterval}` (default 30, `--time-interval 60` passed through, the window on the lookup too, D211); not found lists names and sends neither read; a shared app id with two names resolves the named bucket, two ids with one name are refused (D211); `null` stats and an empty breakdown print no invented zeros (D209); the walk follows `total_items` past a capped page (`limit 2`, second call `offset 2`, total 3), drops items without a string id or name with the warning, empty items |
+| `unit/airs/management.spec.ts:1075-1121` | api-key list projections with schema-valid wire records (`creation_ts`, `expiration`, D207) and `nextOffset`; `create` sends the config unchanged (one POST, D95); `regenerate(id, body)`; `delete(name, updatedBy)` acknowledges with the fixed text (D208) |
+| `management.spec.ts:1127-1174` | customer-app names and ids (`customer_appId`, D207); `get` by name; `update(id, body)` prints the updated name; `delete(name, updatedBy)` names the argument (D208) |
+| `management.spec.ts:1180-1198` | deployment profiles as rows; `--unactivated` sends `?unactivated=true` |
+| `management.spec.ts:1204-1229` | `scan-logs query` sends nothing (not even the token) and exits 1 with the §18.11 text |
+| `management.spec.ts:1231-1444` | consumption: the app id from the overview, both reads with `{appId, appName, timeInterval}` (default 30, `--time-interval 60` passed through, the window on the lookup too, D211); not found lists names and sends neither read; a shared app id with two names resolves the named bucket, two ids with one name are refused (D211); `null` stats and an empty breakdown print no invented zeros (D209); the walk follows `total_items` past a capped page (`limit 2`, second call `offset 2`, total 3), drops items without a string id or name with the warning, empty items |
 | `unit/cli/aliases.spec.ts:55-79` | `ls` on `api-keys`, `customer-apps`, `deployment-profiles` and `sessions` lists; `rm` on `api-keys delete` and `customer-apps delete` |
 | `unit/cli/flag-standardization.spec.ts:66,253-280` | `scan-logs query` accepts `--limit`, `--offset` and the hidden `--page`/`--page-size` and still sends nothing |
 | `unit/config/client-options.spec.ts:113-133` | `mgmtEndpoint` and `mgmtDashboardEndpoint` overrides and defaults (the dashboard default is not `mgmtEndpoint`), explicit OAuth values, `PANW_*` ignored (COMPATIBILITY.md §5.2 gains the dashboard rows) |
@@ -12046,7 +12460,7 @@ command opens the realtime socket). The walk of every response and request schem
   standalone routing-configuration schemas no command decodes), and request validation keeps every format check.
   So no gateway read or write answer changes and no test expectation moves; D306 needs no gateway extension.
 - The user agent is `PAN-AIRS/0.2.2-rust-sdk` on every gateway request in 0.10 and 0.11, and
-  `PAN-AIRS/0.2.3-rust-sdk` from 1.0 (§15.24 point 8; the §2.9 header list; `tests/gateway_inventory.rs` expects it).
+  `PAN-AIRS/0.2.3-rust-sdk` in 1.0 (§15.24 point 8) and `PAN-AIRS/0.2.4-rust-sdk` from 8.0 (§15.25; the §2.9 header list; `tests/gateway_inventory.rs` expects it).
 - G36–G49 are unchanged by 0.2.2 (each re-checked below); G49 is settled on 0.2.2.
 - 0.2.1 adds the experimental Portkey access-policy API (`AccessPoliciesClient`: create, list, get, update and
   delete on an explicitly configured, key-authenticated Portkey control plane, separate from SCM OAuth). The

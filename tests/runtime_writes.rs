@@ -1047,7 +1047,8 @@ mod profiles_create {
             "json",
         ]));
         out.assert_success();
-        assert_eq!(out.stderr, format!("  ✓ Profile created: {}\n", id(901)));
+        // TS 7.3.0 prints a status line (dim, quiet-suppressed), no check mark.
+        assert_eq!(out.stderr, format!("  Profile created: {}\n", id(901)));
         assert_eq!(out.json()["profileName"], "gamma");
         assert_eq!(out.json()["active"], false);
         assert_eq!(
@@ -1088,9 +1089,12 @@ mod profiles_create {
         let fx = world();
         let out = fx.run(&create_profile(&["--prompt-injection", "block"]));
         out.assert_success();
-        assert!(out.stdout.starts_with(
-            "\n  Prisma AIRS — Runtime Configuration\n  Security profile and topic management\n\n\n  Profile Detail:\n\n"
-        ));
+        // TS 7.3.0: the detail without the runtime banner.
+        assert!(
+            out.stdout.starts_with("\n  Profile Detail:\n\n"),
+            "{}",
+            out.stdout
+        );
         let fx = world();
         let out = fx.run(&create_profile(&[
             "--prompt-injection",
@@ -1114,8 +1118,41 @@ mod profiles_create {
             "Specify at least one policy flag (for example --prompt-injection block) or --config <path>",
         );
         assert_usage(
-            &create_profile(&["--prompt-injection", "", "--dlp-profiles", "x"]),
+            &create_profile(&["--prompt-injection", ""]),
             "Specify at least one policy flag (for example --prompt-injection block) or --config <path>",
+        );
+        assert_usage(
+            &[
+                "runtime",
+                "profiles",
+                "create",
+                "--prompt-injection",
+                "block",
+            ],
+            "--name is required unless --config is supplied",
+        );
+        // D336: a directional flag create that fills no direction (no flag, or shared
+        // settings only) is refused before the tenant is read.
+        for shared in [
+            &[][..],
+            &["--max-inline-latency", "8"],
+            &["--inline-timeout-action", "allow"],
+            &["--mask-data-in-storage"],
+            &["--no-enable-full-conversation-inspection"],
+            &["--max-inline-latency", "8", "--no-mask-data-in-storage"],
+        ] {
+            let mut args = create_profile(&["--direction", "response"]);
+            args.extend_from_slice(shared);
+            assert_usage(
+                &args,
+                "Directional flag creation requires at least one protection flag, not only \
+                 shared settings: the service refuses a directional policy with no protection \
+                 in any direction",
+            );
+        }
+        assert_usage(
+            &create_profile(&["--direction", "sideways", "--prompt-injection", "block"]),
+            "--direction must be prompt, response, tool-call, or tool-response",
         );
         for bad in ["1.5", "abc", "-1", ""] {
             assert_usage(
@@ -1123,43 +1160,64 @@ mod profiles_create {
                 "--max-inline-latency must be a non-negative integer",
             );
         }
-        assert_usage(
-            &create_profile(&["--prompt-injection", "block", "--dlp-profiles", "PII"]),
-            "--dlp-profiles and --mask-data-inline require --dlp-action",
-        );
-        assert_usage(
-            &create_profile(&["--prompt-injection", "block", "--mask-data-inline"]),
-            "--dlp-profiles and --mask-data-inline require --dlp-action",
-        );
-        for extra in [&["--no-active"][..], &["--prompt-injection", ""]] {
-            let mut args = create_profile(&["--config", "p.json"]);
+        for extra in [
+            &["--dlp-profiles", "PII"][..],
+            &["--mask-data-inline"],
+            &["--no-mask-data-inline"],
+            &["--dlp-profiles", ""],
+        ] {
+            let mut args = create_profile(&["--prompt-injection", "block"]);
             args.extend_from_slice(extra);
             assert_usage(
                 &args,
-                "--config cannot be combined with --no-active or policy flags",
+                "--dlp-profiles and --[no-]mask-data-inline require --dlp-action when creating a profile",
+            );
+        }
+        for extra in [
+            &["--no-active"][..],
+            &["--prompt-injection", ""],
+            &["--name", "gamma"],
+            &["--direction", "prompt"],
+            &["--no-mask-data-in-storage"],
+            &["--enable-full-conversation-inspection"],
+        ] {
+            let mut args = vec!["runtime", "profiles", "create", "--config", "p.json"];
+            args.extend_from_slice(extra);
+            assert_usage(
+                &args,
+                "--config cannot be combined with profile write flags or selectors",
             );
         }
     }
 
-    /// D103: the file's `profile_name` must match `--name`.
+    /// 8.0 (TS 7.3.0): the file is the whole body and names the profile; `--name` is
+    /// refused beside it (§13.17).
     #[test]
-    fn a_config_file_is_sent_as_is_when_its_name_matches_d103() {
+    fn a_config_file_is_sent_as_is_and_names_the_profile() {
         let fx = world();
         let body = json!({"profile_name": "gamma", "active": true, "policy": {"ai-security-profiles": [{"model-type": "default", "model-configuration": {"x-custom": 1}}]}});
         let path = fx.file("p.json", body.to_string().as_bytes());
-        let out = fx.run(&create_profile(&["--config", &path]));
+        let out = fx.run(&["runtime", "profiles", "create", "--config", &path]);
         out.assert_success();
         assert_eq!(fx.writes()[0].body_json(), Some(body));
+        assert_eq!(out.stderr, format!("  Profile created: {}\n", id(901)));
+    }
+
+    /// 8.0: a `--config` body that fails the TypeScript 0.35.0 request schema is a usage
+    /// error before the tenant (D116 text, exit 2).
+    #[test]
+    fn a_config_file_that_fails_the_schema_is_a_usage_error_d116() {
         let fx = world();
-        let path = fx.file("q.json", br#"{"profile_name": "other", "policy": {}}"#);
-        let out = fx.run(&create_profile(&["--config", &path]));
-        out.assert_code(1);
+        let mut bad = fixtures::runtime::directional_profile();
+        bad["policy"]["ai-security-profiles"][0]["content-type-configurations"]["response"]["model-protection"]
+            [0]["severity"] = json!(123);
+        let path = fx.file("bad.json", bad.to_string().as_bytes());
+        let out = fx.run(&["runtime", "profiles", "create", "--config", &path]);
+        out.assert_code(2);
         assert_eq!(
             out.stderr,
-            error_block(
-                &format!("profile_name in {path} does not match --name gamma"),
-                None,
-                &[]
+            usage_block(
+                "AISEC_USER_REQUEST_PAYLOAD_ERROR:Request body for POST /v1/mgmt/profile did not match schema"
             )
         );
         assert_eq!(fx.server.request_count(), 0, "before the tenant");
@@ -1195,6 +1253,87 @@ mod profiles_create {
             );
             assert_eq!(fx.routes(), [Route::Token, Route::ProfileCreate]);
         }
+    }
+
+    /// 8.0 (TS 7.3.0): `profiles create|update` resolve their format like reads: the
+    /// tenant's `defaultOutput` applies unless `--output` is given; `yaml` stays refused
+    /// (D50).
+    #[test]
+    fn the_tenant_default_output_applies_d50() {
+        for command in ["create", "update"] {
+            let fx = fx_with(|config| {
+                config.set("defaultOutput", "json");
+            });
+            let args: Vec<&str> = if command == "create" {
+                create_profile(&["--prompt-injection", "block"])
+            } else {
+                vec![
+                    "runtime",
+                    "profiles",
+                    "update",
+                    "alpha",
+                    "--prompt-injection",
+                    "block",
+                ]
+            };
+            let out = fx.run(&args);
+            out.assert_success();
+            assert!(out.json()["profileName"].is_string(), "{}", out.stdout);
+            let mut pretty = args.clone();
+            pretty.extend(["--output", "pretty"]);
+            let out = fx.run(&pretty);
+            out.assert_success();
+            assert!(
+                out.stdout.starts_with("\n  Profile Detail:\n"),
+                "{}",
+                out.stdout
+            );
+            let mut yaml = args.clone();
+            yaml.extend(["--output", "yaml"]);
+            assert_usage(
+                &yaml,
+                "Invalid output format 'yaml'. Expected: pretty, table, json",
+            );
+        }
+    }
+
+    /// 8.0: a directional flag body (§13.17; the other three directions written empty,
+    /// D335), and the protection locations of the answer.
+    #[test]
+    fn a_direction_creates_one_directional_entry() {
+        let fx = world();
+        let out = fx.run(&create_profile(&[
+            "--direction",
+            "tool-response",
+            "--agent-security",
+            "block",
+            "--mask-data-in-storage",
+        ]));
+        out.assert_success();
+        assert_eq!(
+            fx.writes()[0].body_json().unwrap()["policy"],
+            json!({"ai-security-profiles": [{
+                "model-type": "default",
+                "content-type-mode": "per_content_type",
+                "model-configuration": {"mask-data-in-storage": true},
+                "content-type-configurations": {
+                    "prompt": {},
+                    "response": {},
+                    "tool-call": {},
+                    "tool-response": {
+                        "agent-protection": [{"name": "agent-security", "action": "block"}]
+                    }
+                }
+            }]})
+        );
+        assert!(
+            out.stdout.contains(
+                "  Protection locations  AI[0] default / prompt, AI[0] default / response, \
+                 AI[0] default / tool-call, AI[0] default / tool-response\n"
+            ),
+            "{}",
+            out.stdout
+        );
     }
 
     #[test]
@@ -1251,7 +1390,7 @@ mod profiles_update {
             .set_profiles(TSG, vec![fixtures::profile(2, "beta", 1), beta]);
         let out = fx.run(&update("beta", &["--prompt-injection", "block"]));
         out.assert_success();
-        assert_eq!(out.stderr, format!("  ✓ Profile updated: {}\n", id(4)));
+        assert_eq!(out.stderr, format!("  Profile updated: {}\n", id(4)));
         assert_eq!(
             fx.lines(),
             [
@@ -1290,7 +1429,7 @@ mod profiles_update {
             &["--prompt-injection", "block", "--output", "json"],
         ));
         out.assert_success();
-        assert_eq!(out.stderr, format!("  ✓ Profile updated: {}\n", id(901)));
+        assert_eq!(out.stderr, format!("  Profile updated: {}\n", id(901)));
         assert_eq!(out.json()["profileId"], id(901));
         assert_eq!(out.json()["revision"], 2);
         assert!(fx.profile(&id(1)).is_some(), "the old revision is kept");
@@ -1321,9 +1460,9 @@ mod profiles_update {
         assert_eq!(out.json()["active"], true);
     }
 
-    /// D117: `--dlp-action` changes only the action.
+    /// `--dlp-action` changes only the action (D117, retired in 8.0: TS 7.3.0 matches).
     #[test]
-    fn dlp_action_keeps_the_dlp_profiles_d117() {
+    fn dlp_action_keeps_the_dlp_profiles() {
         let fx = world();
         let mut alpha = fixtures::profile(1, "alpha", 1);
         alpha["policy"]["ai-security-profiles"][0]["model-configuration"]["data-protection"] = json!({
@@ -1346,26 +1485,48 @@ mod profiles_update {
             "Nothing to update: pass --name, --active, --no-active, a policy flag or --config",
         );
         assert_usage(
-            &update("alpha", &["--dlp-profiles", "x"]),
+            &update(
+                "alpha",
+                &["--direction", "prompt", "--ai-profile-index", "0"],
+            ),
             "Nothing to update: pass --name, --active, --no-active, a policy flag or --config",
         );
+        for extra in [
+            &["--name", "x"][..],
+            &["--active"],
+            &["--direction", "prompt"],
+            &["--ai-profile-index", "1"],
+            &["--no-enable-full-conversation-inspection"],
+        ] {
+            let mut args = update("alpha", &["--config", "p.json"]);
+            args.extend_from_slice(extra);
+            assert_usage(
+                &args,
+                "--config cannot be combined with profile write flags or selectors",
+            );
+        }
         assert_usage(
-            &update("alpha", &["--config", "p.json", "--name", "x"]),
-            "--config cannot be combined with --name, --active, --no-active or policy flags",
+            &update(
+                "alpha",
+                &["--direction", "invalid", "--prompt-injection", "block"],
+            ),
+            "--direction must be prompt, response, tool-call, or tool-response",
         );
+        for bad in ["-1", "1.5", "x", ""] {
+            assert_usage(
+                &update(
+                    "alpha",
+                    &["--ai-profile-index", bad, "--prompt-injection", "block"],
+                ),
+                "--ai-profile-index must be a nonnegative integer",
+            );
+        }
         assert_usage(
             &update(
                 "alpha",
                 &["--prompt-injection", "block", "--max-inline-latency", "2.5"],
             ),
             "--max-inline-latency must be a non-negative integer",
-        );
-        assert_usage(
-            &update(
-                "alpha",
-                &["--prompt-injection", "block", "--mask-data-inline"],
-            ),
-            "--dlp-profiles and --mask-data-inline require --dlp-action",
         );
         let (server, sandbox) = bare();
         let out = run(
@@ -1377,6 +1538,60 @@ mod profiles_update {
         out.assert_code(2);
         assert!(out.stderr.contains("cannot be used with"), "{}", out.stderr);
         assert_eq!(server.request_count(), 0);
+    }
+
+    /// 8.0 (§13.17): a layout refusal after the read is a usage error with nothing
+    /// written; the selected direction's edit keeps the rest; the table answer carries
+    /// `dlpTenantId`.
+    #[test]
+    fn directional_updates_follow_the_layout_rules() {
+        let fx = world();
+        fx.server
+            .set_profiles(TSG, vec![fixtures::runtime::directional_profile()]);
+        let name = "Directionality Test";
+        let out = fx.run(&update(name, &["--prompt-injection", "alert"]));
+        out.assert_code(2);
+        assert_eq!(
+            out.stderr,
+            usage_block("Directional protection edits require --direction")
+        );
+        assert!(fx.writes().is_empty());
+        let out = fx.run(&update(
+            name,
+            &[
+                "--direction",
+                "prompt",
+                "--prompt-injection",
+                "alert",
+                "--output",
+                "table",
+            ],
+        ));
+        out.assert_success();
+        assert!(
+            out.stdout
+                .contains(" dlpTenantId    │ 8259670718644550000 "),
+            "{}",
+            out.stdout
+        );
+        let body = fx.writes()[0].body_json().unwrap();
+        let directions = &body["policy"]["ai-security-profiles"][0]["content-type-configurations"];
+        let before = fixtures::runtime::directional_profile();
+        let prior = &before["policy"]["ai-security-profiles"][0]["content-type-configurations"];
+        assert_eq!(
+            directions["prompt"]["model-protection"][0],
+            json!({"name": "prompt-injection", "action": "alert", "severity": "medium"})
+        );
+        assert_eq!(directions["response"], prior["response"]);
+        let out = fx.run(&update(
+            name,
+            &["--ai-profile-index", "3", "--max-inline-latency", "4"],
+        ));
+        out.assert_code(2);
+        assert_eq!(
+            out.stderr,
+            usage_block("--ai-profile-index does not identify an existing AI profile entry")
+        );
     }
 
     #[test]
@@ -1643,5 +1858,287 @@ mod debug {
         let text = serde_json::to_string(&records).unwrap();
         assert!(text.contains("/v1/mgmt/topic"), "{text}");
         assert!(!text.contains("a new topic"), "no request body");
+    }
+
+    /// 8.0 (scm-sdk 0.2.4): a directional create and a directional flag update log the SDK
+    /// operation names unchanged (the update's lookup walk `airs.management.profiles.list`,
+    /// then `airs.management.profiles.update`) and neither the policy nor the
+    /// `dlp_tenant_id` they send.
+    #[test]
+    fn directional_writes_log_their_operation_names_and_no_body() {
+        let fx = world();
+        fx.server
+            .set_profiles(TSG, vec![fixtures::runtime::directional_profile()]);
+        let config = fx.file(
+            "directional.json",
+            fixtures::runtime::directional_profile()
+                .to_string()
+                .replace("Directionality Test", "Directional Copy")
+                .as_bytes(),
+        );
+        let xdg = airs_test_harness::debug_log::xdg_state_home(&fx.sandbox);
+        let options = RunOptions::new().env("XDG_STATE_HOME", xdg.display().to_string());
+        fx.run_with(
+            &[
+                "runtime", "profiles", "create", "--config", &config, "--debug",
+            ],
+            &options,
+        )
+        .assert_success();
+        let (_, records) = airs_test_harness::debug_log::only_log(&fx.sandbox);
+        let operations: Vec<&str> = records
+            .iter()
+            .filter_map(|record| record["operation"].as_str())
+            .collect();
+        assert_eq!(
+            operations,
+            ["oauth.token", "airs.management.profiles.create"]
+        );
+        let text = serde_json::to_string(&records).unwrap();
+        for secret in [
+            "8259670718644550000",
+            "content-type-configurations",
+            "sensitive content",
+        ] {
+            assert!(!text.contains(secret), "{secret} in the debug log");
+        }
+        let log = airs_test_harness::debug_log::log_dir(&fx.sandbox);
+        std::fs::remove_dir_all(&log).unwrap();
+        fx.run_with(
+            &[
+                "runtime",
+                "profiles",
+                "update",
+                "550e8400-e29b-41d4-a716-446655440000",
+                "--direction",
+                "response",
+                "--toxic-content",
+                "alert",
+                "--debug",
+            ],
+            &options,
+        )
+        .assert_success();
+        let (_, records) = airs_test_harness::debug_log::only_log(&fx.sandbox);
+        let operations: Vec<&str> = records
+            .iter()
+            .filter_map(|record| record["operation"].as_str())
+            .collect();
+        assert_eq!(
+            operations,
+            [
+                "oauth.token",
+                "airs.management.profiles.list",
+                "airs.management.profiles.update"
+            ]
+        );
+        let text = serde_json::to_string(&records).unwrap();
+        for secret in ["content-type-configurations", "toxic-content"] {
+            assert!(!text.contains(secret), "{secret} in the debug log");
+        }
+    }
+}
+
+/// 8.0: scm-sdk 0.2.4's directional profile fields through `profiles create|update`
+/// (DESIGN §13.17, §15.25): the request schema runs before the tenant, an omitted setting
+/// stays omitted, an explicit `false` stays `false`, and a stored value the request schema
+/// refuses stops the update before its write.
+mod sdk_0_2_4 {
+    use super::*;
+
+    fn directional() -> Value {
+        fixtures::runtime::directional_profile()
+    }
+
+    const ID: &str = "550e8400-e29b-41d4-a716-446655440000";
+
+    /// The new fields' request checks (null or a wrong type) need no tenant and send
+    /// nothing: the tenant named does not exist.
+    #[test]
+    fn invalid_new_fields_are_refused_before_the_tenant() {
+        let (server, sandbox) = bare();
+        type Edit = fn(&mut Value);
+        let edits: [Edit; 4] = [
+            |p| p["dlp_tenant_id"] = json!(42),
+            |p| p["dlp_tenant_id"] = Value::Null,
+            |p| {
+                p["policy"]["ai-security-profiles"][0]["content-type-configurations"]["prompt"] =
+                    json!("block")
+            },
+            |p| {
+                p["policy"]["ai-security-profiles"][0]["model-configuration"]["enable-full-conversation-inspection"] =
+                    json!(0)
+            },
+        ];
+        for edit in edits {
+            let mut bad = directional();
+            edit(&mut bad);
+            let path = sandbox.tmp().join("bad.json");
+            std::fs::write(&path, bad.to_string()).unwrap();
+            let path = path.display().to_string();
+            for (args, line) in [
+                (
+                    vec!["runtime", "profiles", "create", "--config", &path],
+                    "POST /v1/mgmt/profile".to_owned(),
+                ),
+                (
+                    vec!["runtime", "profiles", "update", ID, "--config", &path],
+                    format!("PUT /v1/mgmt/profile/uuid/{ID}"),
+                ),
+            ] {
+                let mut args = args;
+                args.extend(["--tenant", "missing"]);
+                let out = run(&rust(), &sandbox, &args, &RunOptions::new());
+                out.assert_code(2);
+                assert_eq!(
+                    out.stderr,
+                    usage_block(&format!(
+                        "AISEC_USER_REQUEST_PAYLOAD_ERROR:Request body for {line} did not match schema"
+                    )),
+                    "{bad}"
+                );
+                assert_eq!(server.request_count(), 0);
+            }
+        }
+    }
+
+    /// A string `dlp_tenant_id` (even one that looks like a number) is sent as a string;
+    /// every direction is sent with its hyphenated key; an explicit `false` is sent.
+    #[test]
+    fn a_complete_create_sends_every_field_as_given() {
+        let fx = world();
+        let config = fx.file("p.json", directional().to_string().as_bytes());
+        fx.run(&["runtime", "profiles", "create", "--config", &config])
+            .assert_success();
+        let body = fx.writes()[0].body_json().unwrap();
+        assert_eq!(body["dlp_tenant_id"], json!("8259670718644550000"));
+        let ai = &body["policy"]["ai-security-profiles"][0];
+        let mut keys: Vec<&String> = ai["content-type-configurations"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        keys.sort();
+        assert_eq!(keys, ["prompt", "response", "tool-call", "tool-response"]);
+        assert_eq!(ai["content-type-mode"], "per_content_type");
+        assert_eq!(
+            ai["model-configuration"]["enable-full-conversation-inspection"],
+            json!(false)
+        );
+        let raw = fx.writes()[0].body_text();
+        for key in [
+            "tool_call",
+            "tool_response",
+            "content_type_mode",
+            "content_type_configurations",
+            "enable_full_conversation_inspection",
+            "data_protection",
+            "dlp-tenant-id",
+        ] {
+            assert!(!raw.contains(key), "{key} is not a wire key");
+        }
+    }
+
+    /// A flag update sends only what the flags change: settings the user omitted stay
+    /// omitted (no default `false` is inserted) and a stored `false` stays `false`.
+    #[test]
+    fn omitted_settings_stay_omitted_and_false_stays_false() {
+        let fx = world();
+        let mut omitted = directional();
+        let config = omitted["policy"]["ai-security-profiles"][0]["model-configuration"]
+            .as_object_mut()
+            .unwrap();
+        config.remove("enable-full-conversation-inspection");
+        config.remove("mask-data-in-storage");
+        fx.server.set_profiles(TSG, vec![omitted.clone()]);
+        fx.run(&[
+            "runtime",
+            "profiles",
+            "update",
+            ID,
+            "--direction",
+            "prompt",
+            "--prompt-injection",
+            "alert",
+        ])
+        .assert_success();
+        let body = fx.writes()[0].body_json().unwrap();
+        let shared = &body["policy"]["ai-security-profiles"][0]["model-configuration"];
+        assert_eq!(
+            shared,
+            &omitted["policy"]["ai-security-profiles"][0]["model-configuration"]
+        );
+        assert!(shared.get("enable-full-conversation-inspection").is_none());
+        assert!(shared.get("mask-data-in-storage").is_none());
+
+        let fx = world();
+        fx.server.set_profiles(TSG, vec![directional()]);
+        fx.run(&[
+            "runtime",
+            "profiles",
+            "update",
+            ID,
+            "--max-inline-latency",
+            "3",
+        ])
+        .assert_success();
+        let body = fx.writes()[0].body_json().unwrap();
+        let shared = &body["policy"]["ai-security-profiles"][0]["model-configuration"];
+        assert_eq!(shared["enable-full-conversation-inspection"], json!(false));
+        assert_eq!(shared["mask-data-in-storage"], json!(false));
+        assert_eq!(shared["latency"]["max-inline-latency"], json!(3));
+        assert!(
+            body.get("dlp_tenant_id").is_none(),
+            "TS 7.3.0's update body"
+        );
+    }
+
+    /// A stored value the request schema refuses (here an explicit `null` the tolerant
+    /// read kept, D334) is never sent back: the merged body fails the schema after the
+    /// read, before any write (§13.17).
+    #[test]
+    fn a_stored_null_stops_the_update_before_its_write() {
+        let fx = world();
+        let mut stored = directional();
+        stored["policy"]["ai-security-profiles"][0]["model-configuration"]["enable-full-conversation-inspection"] =
+            Value::Null;
+        fx.server.set_profiles(TSG, vec![stored]);
+        let out = fx.run(&[
+            "runtime",
+            "profiles",
+            "update",
+            ID,
+            "--max-inline-latency",
+            "3",
+        ]);
+        out.assert_code(2);
+        assert_eq!(
+            out.stderr,
+            usage_block(&format!(
+                "AISEC_USER_REQUEST_PAYLOAD_ERROR:Request body for PUT /v1/mgmt/profile/uuid/{ID} did not match schema"
+            ))
+        );
+        assert!(fx.writes().is_empty());
+        // `topics apply` keeps its exit 1 for a schema failure (§13.17).
+        let out = fx.run(&[
+            "runtime",
+            "topics",
+            "apply",
+            "--profile",
+            "Directionality Test",
+            "--name",
+            "fin",
+            "--direction",
+            "prompt",
+        ]);
+        out.assert_code(1);
+        assert!(
+            out.stderr.contains(&format!(
+                "AISEC_USER_REQUEST_PAYLOAD_ERROR:Request body for PUT /v1/mgmt/profile/uuid/{ID} did not match schema"
+            )),
+            "{}",
+            out.stderr
+        );
+        assert!(fx.writes().is_empty());
     }
 }

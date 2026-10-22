@@ -12,7 +12,7 @@ Paths are abbreviated:
 
 | Prefix | Path |
 |---|---|
-| TS | this repository's history at `5711012` (7.2.1-forgejo.0, the frozen reference; until 8.0 the separate checkout `/Users/cdot/development/redtail/prisma-airs-cli`) |
+| TS | this repository's history at tag `v7.3.0` (`7a54e46`, 7.3.0, the final frozen reference from 8.0; before it `5711012`, 7.2.1-forgejo.0, and until 8.0 the separate checkout `/Users/cdot/development/redtail/prisma-airs-cli`) |
 | H | `/Users/cdot/development/cdot65/prisma-airs-harness` |
 | S | `/Users/cdot/development/redtail/scm-sdk-rs` |
 
@@ -91,6 +91,7 @@ Every row is pinned by a test listed in [COMPATIBILITY.md](COMPATIBILITY.md) §4
 | Renamed command groups | `aigateway` → `gateway` and `agentguard` → `supplychain`. Config keys are renamed too, and no aliases exist. |
 | Dropped commands | `completion`, `redteam judge`, `runtime dlp generate` |
 | Dropped formats | `--output markdown\|csv\|yaml` is a usage error (exit 2). A tenant `defaultOutput` that names one of them makes the config invalid. |
+| Directional profiles (8.0, TS 7.3.0) | `runtime profiles create\|update` and `topics apply\|revert` take `--direction` and `--ai-profile-index` (decimal digits only, D332); the `--no-…` flags and `--[no-]enable-full-conversation-inspection` exist; `profiles create --config` takes the name from the file and refuses `--name`; `--config` is exclusive with every write flag. A create with no policy flag is refused (TS 7.3.0 creates an empty policy, D102); `revert` keeps a still-referenced topic with exit 0 (TS fails, D99). A flag create with `--direction` also writes the other three directions as empty objects, since the service refuses a directional profile without all four (TS 7.3.0's body is refused, D335), and one whose flags fill no direction (shared settings only) is refused before OAuth, exit 2 (TS sends it and the service refuses it, D336). Accepted live for all four directions (DESIGN §13.17); supported, for single-entry profiles. Read the known limitations (§2.3), `dlp_tenant_id` on writes included. |
 | Version | `--version` reports `0.N.0` until 1.0, `1.0.0` for 1.0, and from 8.0.0 the one version shared by every channel |
 | Exit codes | Argument-parse errors exit 2, not 1, and usage is checked before the tenant is read (D1, D2, D18). Signals give 130/143. |
 | Scans fail closed | A failed scan prints `FAILED` and exits 1; TypeScript printed `ALLOW` and exited 0 (D6). Response detections count (D7). A scan is never re-sent (D9). |
@@ -103,6 +104,31 @@ Every row is pinned by a test listed in [COMPATIBILITY.md](COMPATIBILITY.md) §4
 | Tenant commands (0.3) | `tenant create --config` is gone: use `tenant import --from-config <file> --name <name>` (D84). `tenant delete` also deletes the tenant's file (D80). `tenant set <name> mgmtTsgId <tsg>` changes the TSG (D83). Success lines go to stderr and `--quiet` hides them (D74). Input errors exit 2 (D75); values are checked strictly (decimal integers, https endpoints, no empty values, D76). Hints name `airs-cli-rs` (D73). Names that differ only in case are refused (D85), and lists are in byte order (D86). |
 | Concurrent changes (0.3) | Writers wait up to 5 s for each other and name the holder; a crashed writer never leaves a lock behind (D77). |
 | `--debug` (0.2) | The log goes to `~/.local/state/airs-cli/debug/` (or `$XDG_STATE_HOME/airs-cli/debug/`), not the current directory, and only the newest 20 are kept (D61). It records every request, status and allow-listed headers only: no bodies and no URL queries (D62–D66). `tenant` commands and usage errors create no log (D63). |
+
+### 2.3 Known limitations of directional profiles (8.0)
+
+Directional profiles are **supported, for single-entry profiles**: a live run (2026-10-22)
+accepted every direction for creates, edits, topics, backup and restore.
+
+- **Not verified live:** profiles with several AI entries (`--ai-profile-index`), DLP blocks
+  inside a direction (`--dlp-action`, `--dlp-profiles`), and the runtime report's
+  `Protection configurations` column. The offline tests cover them.
+- **Service rules are not checked before sending, except one.** Every directional entry needs
+  all four direction keys (`prompt`, `response`, `tool-call`, `tool-response`; a flag create
+  writes the ones it does not fill as `{}`, and a `--config` body must list all four); the
+  `response` direction refuses `prompt-injection`; and `toxic-content` takes only `block` or
+  `allow` for each level. A write that breaks one fails with HTTP 400 (exit 1), and no
+  response body is shown. The exception (D336): a directional flag create with no protection
+  flag (none, or shared settings only) is refused before anything is sent (exit 2), because
+  the service refuses a policy with no protection in any direction. A `--config` body with
+  four empty directions is still sent, and refused.
+- **`dlp_tenant_id` on writes.** These writes do not send `dlp_tenant_id`: a flag
+  `profiles update`, `topics apply` and `revert`, `profiles restore` (create and overwrite),
+  and `profiles update --config` when the file leaves the key out. The service's answer then
+  reports `dlpTenantId: "none"`; the effect on the profile's stored DLP tenant binding is
+  unknown. No `get` or `list` returns the field, so the CLI cannot carry it over. This
+  matches the TypeScript CLI 7.3.0 and affects legacy profiles too. A `--config` file that
+  holds `dlp_tenant_id` sends it.
 
 ## 3. `prisma-airs-harness` to pure Rust
 

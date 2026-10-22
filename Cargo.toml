@@ -53,9 +53,9 @@ name = "airs_cli_rs"
 path = "src/lib.rs"
 
 [dependencies]
-# Published SDK (crates.io scm-sdk 0.2.3).
-# Exact pin: the CLI is qualified against this release only.
-scm = { package = "scm-sdk", version = "=0.2.3", default-features = false, features = ["reqwest-transport", "scan", "management", "red-team", "dlp", "model-security", "gateway", "agentguard"] }
+# scm-sdk 0.2.4 (DESIGN §15.25): the TypeScript 0.35.0 directional profile models. Exact pin;
+# `management` carries the profile operations. Never enable `serde_json/preserve_order`.
+scm = { package = "scm-sdk", version = "=0.2.4", default-features = false, features = ["reqwest-transport", "scan", "management", "red-team", "dlp", "model-security", "gateway", "agentguard"] }
 clap = { version = "4.5", features = ["derive"] }
 # The direct (never proxied) transport for plain-http loopback endpoints (src/clients.rs).
 # Same version and a subset of the features scm-sdk already enables, so feature

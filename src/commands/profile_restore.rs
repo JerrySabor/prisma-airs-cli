@@ -722,9 +722,9 @@ impl Executor<'_> {
                 Err(refusal) => return Err(self.fail(stop_text(&refusal))),
             };
             let body = pl::profile_body(&item.name, &item.source, &policy);
-            let Ok(request) =
-                m::CreateSecurityProfileRequest::parse(body, scm::validation::Mode::Request)
-            else {
+            // The mapped body is checked again with the TypeScript 0.35.0 request root the
+            // SDK's create and update apply (§13.17), not the model's 0.34.0 binding.
+            let Some(request) = crate::policy::request_body(body) else {
                 return Err(self.fail(STOPPED.to_owned()));
             };
             let inventory = match destination_profiles(

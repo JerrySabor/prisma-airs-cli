@@ -50,7 +50,7 @@ airs runtime topics delete <topicId>                      # asks first (alias: r
 airs runtime topics delete <topicId> --force --updated-by me@example.com
 
 airs runtime profiles create --name prod-guard --prompt-injection block --toxic-content block
-airs runtime profiles create --name prod-guard --config profile.json   # the file's profile_name must be prod-guard
+airs runtime profiles create --config profile.json        # the file is the whole body; its profile_name names the profile
 airs runtime profiles update prod-guard --url-action alert             # merges into the latest revision
 airs runtime profiles update prod-guard --no-active
 airs runtime profiles delete prod-guard                   # asks first; by name or UUID (alias: rm)
@@ -62,19 +62,25 @@ airs runtime topics revert --profile prod-guard --name "Financial Advice"       
 
 - **Every check runs before the tenant is read.** Topic limits (UTF-8 bytes: name 100,
   description 250, 2–5 examples of 250, 1,000 together), UUIDs, `--updated-by` with
-  `--force`, a missing policy flag, `--max-inline-latency` (a whole number of seconds)
-  and `--dlp-profiles`/`--mask-data-inline` without `--dlp-action` are usage errors
-  (exit 2). `--config` files are read before the tenant too (at most 1 MiB, a UTF-8 JSON
-  object); `--config` cannot be combined with other body flags.
+  `--force`, a missing policy flag, `--max-inline-latency` (a whole number of seconds),
+  `--dlp-profiles`/`--[no-]mask-data-inline` without `--dlp-action` on a create, and the
+  `--direction`/`--ai-profile-index` values are usage errors (exit 2). `--config` files are
+  read and checked against the request schema before the tenant too (at most 1 MiB, a
+  UTF-8 JSON object); `--config` cannot be combined with any other write flag or
+  selector.
 - **A write is sent once.** It is never re-sent after a timeout or a 5xx, so a create
   can never be duplicated; only a 401 is replayed once with a fresh token. When the
   service may have applied a failed write, the error says
   `Outcome unknown: the topic may have been created.`; a reply that could not be read
   after a success says so too. Exit 1 in both cases.
 - **Updates change only what you ask for.** `profiles update` keeps `active` unless
-  `--active`/`--no-active` is given, keeps the DLP profiles when only `--dlp-action`
-  changes, and refuses an update with nothing to change. `topics create` and
-  `profiles update` act on the highest revision of a name.
+  `--active`/`--no-active` is given, merges detectors by name (keeping their severities
+  and topic lists), keeps the DLP profiles when only `--dlp-action` changes, writes an
+  explicit `false` for the `--no-…` flags, and refuses an update with nothing to change.
+  `topics create` and `profiles update` act on the highest revision of a name.
+- **Directional profiles** (8.0) keep their protections per direction; see
+  [Directional profiles](./runtime-directional-profiles.md) for `--direction`,
+  `--ai-profile-index`, the layout rules and the known limitations.
 - **Confirmations** (`delete` without `--force`) need stdin and stderr to be
   terminals; the prompt is on stderr and only `y`/`yes` confirms. In scripts pass
   `--force` (with `--updated-by <email>`, which selects the force endpoint).
@@ -85,14 +91,15 @@ airs runtime topics revert --profile prod-guard --name "Financial Advice"       
   write, so a change someone else makes to the profile between that read and the write
   is overwritten (the window is one round trip). `topics revert` removes the topic from
   the profile (the `topic-guardrails` entry goes with its last topic), then deletes the
-  topic with a plain delete. A topic that is still referenced (by another profile, or by
+  topic with a plain delete; a profile that does not reference the topic is refused
+  (exit 2) and nothing is deleted. A topic that is still referenced (by another profile, or by
   an older revision of this one, since every profile update creates a new revision) is
   kept with a warning and the command still exits 0; run `profiles cleanup`, then
   `topics delete`. It asks after looking the topic up.
-- **Output.** Outcome lines (`✓ Topic created: …`) go to stderr (`--quiet` hides them);
-  stdout carries only data: the topic record or the profile detail, in `pretty`,
-  `table` or `json` (the tenant's `defaultOutput` is not used). The deletes print no
-  data. The TypeScript CLI's hidden `--format` still works on `topics create`,
+- **Output.** Outcome lines (`✓ Topic created: …`, `Profile created: …`) go to stderr
+  (`--quiet` hides them); stdout carries only data: the topic record or the profile
+  detail, in `pretty`, `table` or `json` (the tenant's `defaultOutput` is used by
+  `profiles create` and `update` only). The deletes print no data. The TypeScript CLI's hidden `--format` still works on `topics create`,
   `apply`, `revert` and `eval`, with its deprecation warning.
 
 ## Cleaning up old profile revisions

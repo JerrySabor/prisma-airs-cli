@@ -507,6 +507,48 @@ mod parity {
         };
         assert_json(&r, &t);
     }
+
+    /// The 0.86.0 unions are closed in both contracts: a `multi_turn_config` type or a
+    /// `target_connection_config` shape that is no known branch fails the target response
+    /// schema on both CLIs (exit 1, nothing printed; the texts are D38's). scm-sdk 0.2.3
+    /// and 0.2.4 keep that check (DESIGN §15.25 "Cumulative migrations"); their typed
+    /// `Unknown` fallback applies only to documents the schema accepts.
+    #[test]
+    fn unknown_union_shapes_are_refused_like_typescript() {
+        type Edit = fn(&mut Value);
+        let cases: [(&str, Edit); 2] = [
+            ("multi_turn", |params| {
+                params["multi_turn_config"] = json!({"type": "future_session", "window": 3})
+            }),
+            ("connection_config", |params| {
+                params["target_connection_config"] = json!({"future_region": "eu-west"})
+            }),
+        ];
+        let target = fx::target_id(1);
+        for (name, edit) in cases {
+            let seed = move |data: &mut airs_test_harness::RedTeamData| {
+                data.targets = vec![fx::audio_target(1, "n8n Audio")];
+                edit(&mut data.targets[0]["connection_params"]);
+            };
+            let Some((r, t)) = sides_seeded(
+                "unknown_union_shapes_are_refused_like_typescript",
+                &["targets", "get", target.as_str(), "--output", "json"],
+                &seed,
+            ) else {
+                return;
+            };
+            for side in [&r, &t] {
+                assert_eq!(side.run.code, 1, "{name}{}", context(&r, &t));
+                assert_eq!(side.run.stdout, "", "{name}");
+                assert!(
+                    side.run.stderr.contains("AISEC_RESPONSE_VALIDATION:"),
+                    "{name}{}",
+                    context(&r, &t)
+                );
+            }
+            assert_eq!(r.requests, t.requests, "{name}{}", context(&r, &t));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

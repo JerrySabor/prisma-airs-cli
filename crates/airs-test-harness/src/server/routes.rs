@@ -417,6 +417,10 @@ impl State {
             if let Some(policy) = body.get("policy") {
                 record["policy"] = policy.clone();
             }
+            // 8.0 (DESIGN §13.17): the service answers with the request's DLP tenant.
+            if let Some(tenant) = body.get("dlp_tenant_id") {
+                record["dlp_tenant_id"] = tenant.clone();
+            }
         }
         record
     }

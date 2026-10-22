@@ -69,7 +69,7 @@ hidden by `--quiet`). Each line is one HTTP attempt (token requests, retries and
 included):
 
 ```json
-{"timestamp":"2026-10-17T11:03:44.500Z","durationMs":6,"operation":"airs.management.profiles.list","request":{"method":"GET","url":"https://api.apps.paloaltonetworks.com/aisec/v1/mgmt/profiles/tsg/100","headers":{"authorization":"***","service-name":"api","user-agent":"PAN-AIRS/0.2.3-rust-sdk"}},"response":{"status":200,"statusText":"OK","headers":{"content-type":"application/json"}}}
+{"timestamp":"2026-10-17T11:03:44.500Z","durationMs":6,"operation":"airs.management.profiles.list","request":{"method":"GET","url":"https://api.apps.paloaltonetworks.com/aisec/v1/mgmt/profiles/tsg/100","headers":{"authorization":"***","service-name":"api","user-agent":"PAN-AIRS/0.2.4-rust-sdk"}},"response":{"status":200,"statusText":"OK","headers":{"content-type":"application/json"}}}
 ```
 
 Header values outside a short allow-list (`content-type`, `user-agent`, `date`,

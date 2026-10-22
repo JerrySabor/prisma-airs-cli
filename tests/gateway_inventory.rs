@@ -2464,7 +2464,7 @@ mod debug {
                 .filter(|record| record["operation"] != "oauth.token")
             {
                 assert_eq!(
-                    record["request"]["headers"]["user-agent"], "PAN-AIRS/0.2.3-rust-sdk",
+                    record["request"]["headers"]["user-agent"], "PAN-AIRS/0.2.4-rust-sdk",
                     "{args:?}"
                 );
             }

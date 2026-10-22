@@ -60,6 +60,27 @@ fn with_dlp() -> Value {
     profile
 }
 
+/// The TypeScript 7.3.0 directional fixture (TSG 100, DESIGN §13.17) with the topic in
+/// its `response` direction and a custom DLP member in its `prompt` direction.
+fn directional() -> Value {
+    let mut profile = fixtures::runtime::directional_profile();
+    let directions =
+        &mut profile["policy"]["ai-security-profiles"][0]["content-type-configurations"];
+    directions["response"]["model-protection"]
+        .as_array_mut()
+        .unwrap()
+        .push(
+            json!({"name": "topic-guardrails", "action": "allow", "topic-list": [
+                {"action": "block", "topic": [
+                    {"topic_name": "Restricted", "topic_id": fixtures::uuid(11), "revision": 3}
+                ]}
+            ]}),
+        );
+    directions["prompt"]["data-protection"]["data-leak-detection"]["member"] =
+        json!([{"text": "My Profile", "id": "dp-src", "version": "1"}]);
+    profile
+}
+
 type Seed = fn(&FixtureServer);
 
 /// The source TSG 100: `Production` (referencing the topic) and `Staging`.
@@ -429,6 +450,145 @@ mod parity {
                 context(&r, &t)
             );
         }
+    }
+
+    /// 8.0 (§13.17): a directional profile backs up to the same record, and a forced
+    /// cross-tenant restore with `--on-missing-dlp basic` sends the same bodies: the topic
+    /// remapped inside its direction, the custom DLP member of the `prompt` direction made
+    /// Basic. A `verify` re-run against the restored profile compares directions strictly
+    /// and writes nothing on either CLI.
+    #[test]
+    fn directional_profiles_round_trip_like_typescript() {
+        let Some(ts) = require_ts("directional_profiles_round_trip_like_typescript") else {
+            return;
+        };
+        let seed: Seed = |server| {
+            server.set_profiles(SOURCE, vec![directional()]);
+            server.set_topics(SOURCE, vec![topic()]);
+        };
+        let args = ["backup", "--output-file", "@b.json", "--output", "json"];
+        let r = exec(&rust(), SOURCE, seed, &[], &args);
+        let t = exec(&ts, SOURCE, seed, &[], &args);
+        assert_eq!((r.run.code, t.run.code), (0, 0), "{}", context(&r, &t));
+        let rust_file: Value =
+            serde_json::from_str(&std::fs::read_to_string(r.tmp("b.json")).unwrap()).unwrap();
+        let ts_file: Value =
+            serde_json::from_str(&std::fs::read_to_string(t.tmp("b.json")).unwrap()).unwrap();
+        assert!(json_semantic_eq(
+            &rust_file["profiles"][0]["record"],
+            &ts_file["profiles"][0]
+        ));
+        let backup = rust_backup(seed);
+        let (r, t) = restore_pair(
+            &ts,
+            &backup,
+            DEST,
+            &[
+                "--on-missing-dlp",
+                "basic",
+                "--expect-tsg",
+                DEST,
+                "--force",
+                "--output",
+                "json",
+            ],
+            &["--allow-other-tenant"],
+            |_| {},
+        );
+        assert_eq!((r.run.code, t.run.code), (0, 0), "{}", context(&r, &t));
+        let rust_writes: Vec<Value> = r.writes().iter().map(|request| shape(request)).collect();
+        let ts_writes: Vec<Value> = t.writes().iter().map(|request| shape(request)).collect();
+        assert_eq!(rust_writes.len(), ts_writes.len());
+        for (rust_write, ts_write) in rust_writes.iter().zip(&ts_writes) {
+            assert!(
+                json_semantic_eq(rust_write, ts_write),
+                "{rust_write} vs {ts_write}"
+            );
+        }
+        let created = rust_writes
+            .iter()
+            .find(|write| {
+                write["path"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .ends_with("/profile")
+            })
+            .expect("the profile create");
+        let directions =
+            &created["body"]["policy"]["ai-security-profiles"][0]["content-type-configurations"];
+        assert_eq!(
+            directions["prompt"]["data-protection"]["data-leak-detection"]["member"],
+            json!([{"text": "sensitive content", "id": "", "version": "2"}]),
+            "Basic detection inside the direction"
+        );
+        assert_ne!(
+            directions["response"]["model-protection"][2]["topic-list"][0]["topic"][0]["topic_id"],
+            json!(fixtures::uuid(11)),
+            "the topic is remapped to the destination's"
+        );
+        assert_eq!(
+            without_rust_keys(r.run.json()),
+            t.run.json(),
+            "{}",
+            context(&r, &t)
+        );
+        // `verify` against an identical directional profile: no write on either CLI.
+        let same: fn(&FixtureServer) = |server| {
+            let mut existing = directional();
+            existing["tsg_id"] = json!(DEST);
+            existing["profile_id"] = json!(fixtures::uuid(56));
+            let directions =
+                &mut existing["policy"]["ai-security-profiles"][0]["content-type-configurations"];
+            directions["response"]["model-protection"]
+                .as_array_mut()
+                .unwrap()
+                .pop();
+            directions["prompt"]["data-protection"]["data-leak-detection"]["member"] =
+                json!([{"text": "sensitive content", "id": "", "version": "2"}]);
+            server.set_profiles(DEST, vec![existing]);
+            let mut restricted = topic();
+            restricted["topic_id"] = json!(fixtures::uuid(57));
+            server.set_topics(DEST, vec![restricted]);
+        };
+        let plain = rust_backup(|server: &FixtureServer| {
+            let mut profile = directional();
+            profile["policy"]["ai-security-profiles"][0]["content-type-configurations"]["response"]
+                ["model-protection"]
+                .as_array_mut()
+                .unwrap()
+                .pop();
+            server.set_profiles(SOURCE, vec![profile]);
+        });
+        let (r, t) = restore_pair(
+            &ts,
+            &plain,
+            DEST,
+            &[
+                "--on-conflict",
+                "verify",
+                "--on-missing-dlp",
+                "basic",
+                "--expect-tsg",
+                DEST,
+                "--force",
+                "--output",
+                "json",
+            ],
+            &["--allow-other-tenant"],
+            same,
+        );
+        assert_eq!((r.run.code, t.run.code), (0, 0), "{}", context(&r, &t));
+        assert!(
+            r.writes().is_empty() && t.writes().is_empty(),
+            "{}",
+            context(&r, &t)
+        );
+        assert_eq!(
+            without_rust_keys(r.run.json()),
+            t.run.json(),
+            "{}",
+            context(&r, &t)
+        );
     }
 
     /// The plan refusals carry TypeScript's texts (exit 1, no write).

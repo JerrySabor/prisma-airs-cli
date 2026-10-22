@@ -558,6 +558,139 @@ mod backup {
         assert_eq!(file["profiles"][0]["record"], unknown);
     }
 
+    /// 8.0 (scm-sdk 0.2.4, D334): a directional record is stored as the server sent it: a
+    /// string `dlp_tenant_id`, an explicit `false`, an omitted shared setting and an omitted
+    /// direction stay as they were (nothing inserted), and an unknown direction, an unknown
+    /// mode and an explicit `null` of a newly modelled field survive. Restoring that record
+    /// sends the request schema's refusal, not a changed body (§13.17, §15.25).
+    #[test]
+    fn directional_records_are_stored_as_sent() {
+        let f = fx(SOURCE);
+        let mut profile = fixtures::runtime::directional_profile();
+        profile["tsg_id"] = json!(SOURCE);
+        let ai = &mut profile["policy"]["ai-security-profiles"][0];
+        let directions = ai["content-type-configurations"].as_object_mut().unwrap();
+        directions.remove("tool-call");
+        directions.insert(
+            "audio".into(),
+            json!({"model-protection": [{"name": "future-detector", "action": "alert"}]}),
+        );
+        ai["content-type-mode"] = json!("per_modality");
+        ai["model-configuration"]
+            .as_object_mut()
+            .unwrap()
+            .remove("mask-data-in-storage");
+        let mut nulls = profile.clone();
+        nulls["profile_id"] = json!(fixtures::uuid(9));
+        nulls["profile_name"] = json!("Nulls");
+        nulls["dlp_tenant_id"] = Value::Null;
+        nulls["policy"]["ai-security-profiles"][0]["model-configuration"]["enable-full-conversation-inspection"] =
+            Value::Null;
+        f.server
+            .set_profiles(SOURCE, vec![profile.clone(), nulls.clone()]);
+        f.server.set_topics(SOURCE, Vec::new());
+        let path = f.tmp("directional.json");
+        f.profiles(&["backup", "--output-file", &path])
+            .assert_success();
+        let file = json_of(&path);
+        let records: Vec<&Value> = file["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| &entry["record"])
+            .collect();
+        assert_eq!(records, [&profile, &nulls]);
+        let stored = &records[0]["policy"]["ai-security-profiles"][0];
+        assert_eq!(records[0]["dlp_tenant_id"], json!("8259670718644550000"));
+        assert_eq!(
+            stored["model-configuration"]["enable-full-conversation-inspection"],
+            json!(false)
+        );
+        assert!(
+            stored["model-configuration"]
+                .get("mask-data-in-storage")
+                .is_none()
+        );
+        assert!(
+            stored["content-type-configurations"]
+                .get("tool-call")
+                .is_none()
+        );
+        assert!(records[1].get("dlp_tenant_id").is_some_and(Value::is_null));
+    }
+
+    /// 8.0 (scm-sdk 0.2.4, §15.25): every page of the walk is read without the response
+    /// defaults and stored as sent. Directional records on both pages (an explicit `false`,
+    /// a string or `null` `dlp_tenant_id`, an unknown direction and mode, a `null`
+    /// inspection setting, an unknown top-level key, an omitted direction) are stored
+    /// as the same JSON values. (`--debug` is refused for the transfer commands, D156; the
+    /// page reads are the SDK's `airs.management.profiles.list`.)
+    #[test]
+    fn directional_records_are_stored_losslessly_on_every_page() {
+        let f = fx(SOURCE);
+        let mut rows: Vec<Value> = (0..150)
+            .map(|n| {
+                let mut row = fixtures::profile(100 + n, &format!("P{n:03}"), 1);
+                row["tsg_id"] = json!(SOURCE);
+                row
+            })
+            .collect();
+        let directional = |n: u64, name: &str| {
+            let mut profile = fixtures::runtime::directional_profile();
+            profile["profile_id"] = json!(fixtures::uuid(n));
+            profile["profile_name"] = json!(name);
+            profile["tsg_id"] = json!(SOURCE);
+            profile
+        };
+        rows[7] = directional(901, "Near");
+        let mut far = directional(902, "Far");
+        far["dlp_tenant_id"] = Value::Null;
+        far["extra_top_level"] = json!({"kept": [1, null]});
+        let ai = &mut far["policy"]["ai-security-profiles"][0];
+        ai["content-type-mode"] = json!("per_modality");
+        ai["content-type-configurations"]["audio"] =
+            json!({"model-protection": [{"name": "future-detector", "action": "alert"}]});
+        ai["content-type-configurations"]
+            .as_object_mut()
+            .unwrap()
+            .remove("tool-response");
+        ai["model-configuration"]["enable-full-conversation-inspection"] = Value::Null;
+        rows[142] = far;
+        f.server.set_profiles(SOURCE, rows.clone());
+        f.server.set_topics(SOURCE, Vec::new());
+        let path = f.tmp("pages.json");
+        f.profiles(&["backup", "--output-file", &path])
+            .assert_success();
+        assert_eq!(
+            f.api(),
+            [
+                PROFILES_100,
+                "GET /aisec/v1/mgmt/profiles/tsg/100?offset=100&limit=100&latest=true"
+            ]
+        );
+        let file = json_of(&path);
+        let stored: Vec<&Value> = file["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| &entry["record"])
+            .collect();
+        assert_eq!(stored.len(), 150);
+        for (index, name) in [(7, "Near"), (142, "Far")] {
+            let record = stored
+                .iter()
+                .find(|record| record["profile_name"] == name)
+                .unwrap();
+            assert_eq!(*record, &rows[index], "{name}");
+        }
+        let far = stored
+            .iter()
+            .find(|record| record["profile_name"] == "Far")
+            .unwrap();
+        assert!(far.get("dlp_tenant_id").is_some_and(Value::is_null));
+        assert_eq!(far["extra_top_level"], json!({"kept": [1, null]}));
+    }
+
     /// A failed read is its §6 message; a 5xx is retried by the SDK (reads).
     #[test]
     fn read_failures() {
@@ -635,6 +768,57 @@ mod backup {
 
 mod restore {
     use super::*;
+
+    /// 8.0 (scm-sdk 0.2.4): a directional profile restores with its policy as backed up
+    /// (every direction, an unknown one included, an explicit `false`, nothing inserted) and
+    /// without the source's tenant-bound `dlp_tenant_id` (TS's `{profile_name, active,
+    /// policy}` body). A record holding an explicit `null` for a newly modelled field fails
+    /// the request schema during planning: nothing is written (D334).
+    #[test]
+    fn directional_profiles_restore_their_policy_as_backed_up() {
+        let source = fx(SOURCE);
+        let mut profile = fixtures::runtime::directional_profile();
+        profile["tsg_id"] = json!(SOURCE);
+        profile["policy"]["ai-security-profiles"][0]["content-type-configurations"]["audio"] =
+            json!({"model-protection": [{"name": "future-detector", "action": "alert"}]});
+        source.server.set_profiles(SOURCE, vec![profile.clone()]);
+        source.server.set_topics(SOURCE, Vec::new());
+        let text = std::fs::read_to_string(source.backup_file("d.json", &[])).unwrap();
+        let dest = fx(DEST);
+        dest.server.set_profiles(DEST, Vec::new());
+        let file = dest.write("d.json", &text);
+        let mut args = vec!["restore", file.as_str()];
+        args.extend(FORCE);
+        dest.profiles(&args).assert_success();
+        let writes = dest.writes();
+        assert_eq!(writes.len(), 1);
+        let body = writes[0].body_json().unwrap();
+        assert_eq!(
+            body,
+            json!({"profile_name": "Directionality Test", "active": true, "policy": profile["policy"]})
+        );
+
+        let mut nulls = profile.clone();
+        nulls["policy"]["ai-security-profiles"][0]["model-configuration"]["enable-full-conversation-inspection"] =
+            Value::Null;
+        source.server.set_profiles(SOURCE, vec![nulls]);
+        let path = source.tmp("nulls.json");
+        source
+            .profiles(&["backup", "--output-file", &path])
+            .assert_success();
+        let dest = fx(DEST);
+        dest.server.set_profiles(DEST, Vec::new());
+        let file = dest.write("nulls.json", &std::fs::read_to_string(&path).unwrap());
+        let mut args = vec!["restore", file.as_str()];
+        args.extend(FORCE);
+        let out = dest.profiles(&args);
+        out.assert_code(1);
+        assert_eq!(
+            out.stderr,
+            "\n  ✗ Error: AISEC_USER_REQUEST_PAYLOAD_ERROR:Request body for POST /v1/mgmt/profile did not match schema\n\n"
+        );
+        assert!(dest.writes().is_empty(), "{out:?}");
+    }
 
     /// TS: a dry run only GETs (profiles, then topics for the reference) and prints the
     /// preview.

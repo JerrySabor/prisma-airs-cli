@@ -1,24 +1,29 @@
-//! `runtime topics apply` and `runtime topics revert` (DESIGN §13.4, §13.8, §13.9).
+//! `runtime topics apply` and `runtime topics revert` (DESIGN §13.4, §13.8, §13.9,
+//! §13.17).
 //!
 //! Both read the topics first and the profile last: the new policy is computed from that
 //! one profile read, with no request and no prompt between it and the PUT (D97). The
 //! topic-guardrails edits are the pure functions of [`crate::policy`]; an unchanged
-//! policy is not written. `revert` then deletes the topic with a plain delete (D99) and
+//! policy is not written. Both act on one protection block, chosen by `--direction` and
+//! `--ai-profile-index` under the §13.17 layout rules (a refusal is a usage error and
+//! nothing is written). `revert` then deletes the topic with a plain delete (D99) and
 //! reports a partial completion when the delete fails after the profile was updated.
 
-use super::{Invocation, confirm, nothing_changed, topics::complete_walk, walk_options};
+use super::{
+    Invocation, confirm, nothing_changed, profile_walk_options, topics::complete_walk, walk_options,
+};
 use crate::cli::{TopicApplyArgs, TopicRevertArgs};
-use crate::clients::WALK_BUDGET;
+use crate::clients::{SINGLE_REQUEST_BUDGET, WALK_BUDGET};
 use crate::error::{CliError, InterruptContext};
 use crate::output::{Format, terminal_safe};
 use crate::policy::{self, TopicIdentity};
+use crate::profile_policy::Selector;
 use crate::views;
 use crate::writes::{self, Change};
 use scm::ErrorKind;
 use scm::airs::management::models::{CreateSecurityProfileRequest, CustomTopic, SecurityProfile};
 use scm::airs::management::{ProfilesClient, TopicsClient};
 use scm::pagination::CollectOptions;
-use scm::validation::Mode;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
@@ -29,6 +34,7 @@ pub struct ApplyPlan {
     pub name: String,
     /// `block` or `allow`.
     pub intent: String,
+    pub selector: Selector,
     pub format: Format,
 }
 
@@ -38,6 +44,7 @@ pub struct RevertPlan {
     pub profile: String,
     pub name: String,
     pub force: bool,
+    pub selector: Selector,
     pub format: Format,
 }
 
@@ -48,10 +55,12 @@ pub fn plan_apply(args: &TopicApplyArgs, format: Format) -> Result<ApplyPlan, Cl
             args.intent
         )));
     }
+    let selector = Selector::parse(args.direction.as_deref(), args.ai_profile_index.as_deref())?;
     Ok(ApplyPlan {
         profile: args.profile.clone(),
         name: args.name.clone(),
         intent: args.intent.clone(),
+        selector,
         format,
     })
 }
@@ -61,6 +70,7 @@ pub fn plan_revert(
     format: Format,
     interactive: bool,
 ) -> Result<RevertPlan, CliError> {
+    let selector = Selector::parse(args.direction.as_deref(), args.ai_profile_index.as_deref())?;
     if !args.force && !interactive {
         return Err(CliError::usage(format!(
             "refusing to revert topic \"{}\" without --force in non-interactive mode",
@@ -71,6 +81,7 @@ pub fn plan_revert(
         profile: args.profile.clone(),
         name: args.name.clone(),
         force: args.force,
+        selector,
         format,
     })
 }
@@ -174,7 +185,7 @@ fn read_policy(profile: &SecurityProfile, id: &str) -> Result<Option<Value>, Cli
 }
 
 /// The PUT body `{profile_name, active, policy}` from the read record (`active` omitted
-/// when the record has none), validated for `PUT /v1/mgmt/profile/uuid/<id>` (§13.2).
+/// when the record has none), validated for `PUT /v1/mgmt/profile/uuid/<id>` (§13.2, §13.17).
 fn profile_body(
     profile: &SecurityProfile,
     id: &str,
@@ -186,8 +197,10 @@ fn profile_body(
         body.insert("active".into(), json!(active));
     }
     body.insert("policy".into(), policy);
-    CreateSecurityProfileRequest::parse(Value::Object(body), Mode::Request)
-        .map_err(|_| writes::invalid_body("PUT", &format!("/v1/mgmt/profile/uuid/{id}")))
+    // The TypeScript 0.35.0 request root (§13.17); a mismatch stays exit 1 here, as in
+    // TypeScript 7.3.0, whose topic writes report a schema failure as an operational error.
+    policy::request_body(Value::Object(body))
+        .ok_or_else(|| writes::invalid_body("PUT", &format!("/v1/mgmt/profile/uuid/{id}")))
 }
 
 /// The `topics apply` record (TS `--format json` shape and order).
@@ -217,7 +230,7 @@ pub async fn apply(invocation: &mut Invocation, plan: &ApplyPlan) -> Result<(), 
         })?;
     // The profile is read last; nothing lies between this read and the PUT (D97).
     let profiles = management.profiles();
-    let options = walk_options()?;
+    let options = profile_walk_options()?;
     let (current, id) = read_profile(invocation, &profiles, &plan.profile, &options).await?;
     let before = read_policy(&current, &id)?;
     let new_ref = json!({
@@ -225,7 +238,13 @@ pub async fn apply(invocation: &mut Invocation, plan: &ApplyPlan) -> Result<(), 
         "topic_name": topic.name,
         "revision": topic.revision,
     });
-    let after = policy::apply_topic(before.clone(), topic.identity(), new_ref, &plan.intent);
+    let after = policy::apply_topic(
+        before.clone(),
+        &plan.selector,
+        topic.identity(),
+        new_ref,
+        &plan.intent,
+    )?;
     if before.as_ref() == Some(&after) {
         invocation.output.status(&format!(
             "Profile {} already has {} with intent {}; nothing was written",
@@ -237,7 +256,8 @@ pub async fn apply(invocation: &mut Invocation, plan: &ApplyPlan) -> Result<(), 
         let body = profile_body(&current, &id, after)?;
         let secrets = invocation.secrets.clone();
         writes::send(&secrets, Change::ProfileUpdated, async || {
-            profiles.update(&id, &body, None).await
+            let options = crate::runtime::request_options(SINGLE_REQUEST_BUDGET)?;
+            profiles.update(&id, &body, Some(&options)).await
         })
         .await?;
         invocation.committed = true;
@@ -308,32 +328,23 @@ pub async fn revert(invocation: &mut Invocation, plan: &RevertPlan) -> Result<()
         return Ok(());
     }
     let profiles = management.profiles();
-    let options = walk_options()?;
+    let options = profile_walk_options()?;
     let (current, id) = read_profile(invocation, &profiles, &plan.profile, &options).await?;
     let before = read_policy(&current, &id)?;
+    // A topic the selected block does not reference, or that another block still
+    // references, is refused here: nothing is written or deleted (§13.17).
+    let after = policy::revert_topic(before.as_ref(), &plan.selector, topic.identity())?;
     let secrets = invocation.secrets.clone();
-    let updated = match policy::revert_topic(before.as_ref(), topic.identity()) {
-        None => {
-            invocation.output.status(&format!(
-                "Profile {} does not reference {}; it was not changed",
-                terminal_safe(&plan.profile),
-                terminal_safe(&plan.name)
-            ));
-            false
-        }
-        Some(after) => {
-            let body = profile_body(&current, &id, after)
-                .map_err(|error| with_detail(error, "The topic was not deleted.".into()))?;
-            writes::send(&secrets, Change::ProfileUpdated, async || {
-                profiles.update(&id, &body, None).await
-            })
-            .await
-            .map_err(|error| with_detail(error, "The topic was not deleted.".into()))?;
-            // An interruption from here on names the completed step first (§13.2).
-            invocation.interrupt = Some(InterruptContext::ProfileUpdatedTopicKept);
-            true
-        }
-    };
+    let body = profile_body(&current, &id, after)
+        .map_err(|error| with_detail(error, "The topic was not deleted.".into()))?;
+    writes::send(&secrets, Change::ProfileUpdated, async || {
+        let options = crate::runtime::request_options(SINGLE_REQUEST_BUDGET)?;
+        profiles.update(&id, &body, Some(&options)).await
+    })
+    .await
+    .map_err(|error| with_detail(error, "The topic was not deleted.".into()))?;
+    // An interruption from here on names the completed step first (§13.2).
+    invocation.interrupt = Some(InterruptContext::ProfileUpdatedTopicKept);
     let deleted = writes::attempt(async || topics.delete(&topic.id, None).await).await;
     // D99 (0.4.1): a 409 means the topic is still referenced (by another profile, or by
     // an older revision of this one: every profile PUT mints a new revision). The
@@ -343,9 +354,6 @@ pub async fn revert(invocation: &mut Invocation, plan: &RevertPlan) -> Result<()
         Err(error) if error.kind() == ErrorKind::Http && error.status() == Some(409) => true,
         Err(error) => {
             let error = writes::describe(&error, Change::TopicDeleted, &secrets);
-            if !updated {
-                return Err(error);
-            }
             return Err(match error {
                 CliError::Interrupted(InterruptContext::NothingChanged) => {
                     CliError::Interrupted(InterruptContext::ProfileUpdatedTopicKept)
@@ -399,6 +407,8 @@ mod tests {
             profile: "p".into(),
             name: "n".into(),
             intent: intent.into(),
+            direction: None,
+            ai_profile_index: None,
             format: None,
         }
     }
@@ -429,6 +439,8 @@ mod tests {
             profile: "p".into(),
             name: "fin".into(),
             force: false,
+            direction: None,
+            ai_profile_index: None,
             format: None,
         };
         assert_eq!(

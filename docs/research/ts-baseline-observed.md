@@ -3,9 +3,18 @@
 What the built TypeScript reference CLI **actually does** against the loopback fixture
 server from `crates/airs-test-harness`. Everything below was executed, not read from code.
 
-- CLI: `.reference/prisma-airs-cli/dist/cli/index.js`, package `7.2.1-forgejo.0`, commit
-  `5711012246d325f20dbe93b710dcc697a7f18a8a`, TS SDK `@cdot65/prisma-airs-sdk` 0.34.0.
-- Node `v24.21.0`, macOS (Darwin 27), 2026-10-16.
+- CLI: `.reference/prisma-airs-cli/dist/cli/index.js`, package `7.3.0`, commit
+  `7a54e46eee4f7914d610bc78d2f98dd7de09fbfe` (tag `v7.3.0`), TS SDK
+  `@cdot65/prisma-airs-sdk` 0.35.0.
+- Node `v24.21.0`, macOS (Darwin 27), first recorded 2026-10-16 on `7.2.1-forgejo.0`
+  (`5711012`, SDK 0.34.0).
+- **Re-run on 7.3.0 (2026-10-22, the final reference move, docs/TESTING.md §3.4).** The
+  example was run on both builds (the old one from a scratch build of `5711012` through
+  `AIRS_TS_CLI_ENTRY`) and the outputs diffed with ports, durations, sandbox paths and scan
+  ids normalised. The only differences are `--version` (`7.3.0`) and the SDK user agent
+  (`PAN-AIRS/0.35.0-typescript-sdk`); every other observation below holds unchanged. What
+  7.3.0 changes is in the profile and topic writes, which this baseline does not run; DESIGN
+  §13.17 and the parity tests record it.
 - Harness invariants for every run: `env -i`-style allowlist (`PATH`, `HOME=<sandbox>/home`,
   `TMPDIR=<sandbox>/tmp`, `PRISMA_AIRS_TENANTS_PATH=<sandbox>/state/tenants.json`,
   `NO_COLOR=1`, `NO_PROXY=127.0.0.1,localhost`), stdin `/dev/null`, cwd `<sandbox>/cwd`,
@@ -54,7 +63,7 @@ body: grant_type=client_credentials&scope=tsg_id%3A100
 
 ```
 GET /aisec/v1/mgmt/profiles/tsg/100?offset=0&limit=100&latest=true
-user-agent: PAN-AIRS/0.34.0-typescript-sdk
+user-agent: PAN-AIRS/0.35.0-typescript-sdk
 service-name: api
 authorization: Bearer mock-token-100
 (+ undici accept/accept-language/sec-fetch-mode/accept-encoding)
@@ -78,7 +87,7 @@ There is no body, no content-type and no `x-tsg-id`. The query order is always `
 
 ```
 POST /scan/v1/scan/sync/request
-user-agent: PAN-AIRS/0.34.0-typescript-sdk
+user-agent: PAN-AIRS/0.35.0-typescript-sdk
 service-name: api
 content-type: application/json
 x-pan-token: FAKE-APIKEY-100
@@ -107,7 +116,7 @@ body: {"ai_profile":{"profile_name":"fixture-profile"},"contents":[{"prompt":"he
 
 | Scenario | exit | stdout | stderr |
 |---|---|---|---|
-| `--version` | 0 | `7.2.1-forgejo.0\n` | — |
+| `--version` | 0 | `7.3.0\n` | — |
 | `runtime profiles list --output json`, empty | 0 | `[]\n` | `  Showing 0\n` |
 | same, rows `alpha r1, alpha r2, beta r1` (server collapses) | 0 | 2-space JSON array: `alpha` rev 2, `beta` rev 1; keys `profileId, profileName, revision, active, createdBy, updatedBy, lastModifiedTs, policy` | `  Showing 2\n` |
 | `--limit 1` (server sends `next_offset: 1`) | 0 | 1 row | `  Showing 1 (more available)\n` |

@@ -217,6 +217,49 @@ mod topics_apply {
         args
     }
 
+    /// 8.0 (§13.17): `--direction` applies into that direction only; a re-apply writes
+    /// nothing; a bad selector is a usage error before the tenant.
+    #[test]
+    fn a_direction_selects_the_protection_block() {
+        let fx = world();
+        let mut profile = fixtures::runtime::directional_profile();
+        profile["profile_name"] = json!("alpha");
+        fx.server.set_profiles(TSG, vec![profile.clone()]);
+        let args = apply(
+            "alpha",
+            "fin",
+            &["--direction", "tool-call", "--output", "json"],
+        );
+        let out = fx.run(&args);
+        out.assert_success();
+        let body = fx.writes()[0].body_json().unwrap();
+        let directions = &body["policy"]["ai-security-profiles"][0]["content-type-configurations"];
+        assert_eq!(
+            directions["tool-call"]["model-protection"][2],
+            json!({"name": "topic-guardrails", "action": "allow", "options": [],
+                "topic-list": [{"action": "block", "topic": [{"topic_id": id(12), "topic_name": "fin", "revision": 2}]}]})
+        );
+        let prior = &profile["policy"]["ai-security-profiles"][0]["content-type-configurations"];
+        for other in ["prompt", "response", "tool-response"] {
+            assert_eq!(directions[other], prior[other]);
+        }
+        let again = fx.run(&args);
+        again.assert_success();
+        assert_eq!(fx.writes().len(), 1, "nothing to write the second time");
+        assert_eq!(
+            again.stderr,
+            "  Profile alpha already has fin with intent block; nothing was written\n"
+        );
+        assert_usage(
+            &apply("alpha", "fin", &["--direction", "sideways"]),
+            "--direction must be prompt, response, tool-call, or tool-response",
+        );
+        assert_usage(
+            &apply("alpha", "fin", &["--ai-profile-index", "-1"]),
+            "--ai-profile-index must be a nonnegative integer",
+        );
+    }
+
     /// D97: the topics first, the profile last, then exactly one PUT built from that read.
     #[test]
     fn the_profile_is_read_last_and_put_once_d97() {
@@ -707,23 +750,19 @@ mod topics_revert {
         );
     }
 
-    /// D99: a profile without the topic is not written; the topic is still deleted.
+    /// 8.0 (TS 7.3.0): a profile that does not reference the topic is refused before any
+    /// write; the topic is not deleted (§13.17).
     #[test]
-    fn a_profile_without_the_topic_is_not_written_d99() {
+    fn a_profile_without_the_topic_is_refused() {
         let fx = world();
         let out = fx.run(&revert("alpha", "other", &["--force"]));
-        out.assert_success();
+        out.assert_code(2);
         assert_eq!(
             out.stderr,
-            "  Profile alpha does not reference other; it was not changed\n"
+            usage_block("Topic \"other\" is not assigned to the selected protection section")
         );
-        assert_eq!(
-            fx.writes()
-                .iter()
-                .map(RecordedRequest::line)
-                .collect::<Vec<_>>(),
-            [format!("DELETE /aisec/v1/mgmt/topic/{}", id(13))]
-        );
+        assert!(fx.writes().is_empty(), "nothing written or deleted");
+        assert!(fx.topic_ids().contains(&id(13)));
     }
 
     /// D99 (0.4.1): a topic still referenced elsewhere is refused by the plain delete
@@ -754,6 +793,16 @@ mod topics_revert {
             )
         );
         assert!(fx.topic_ids().contains(&id(12)));
+        let first = fx.profile(&id(1)).unwrap();
+        let fx = world();
+        let groups = json!([{"action": "block", "topic": [fin_ref()]}]);
+        fx.server.set_profiles(
+            TSG,
+            vec![
+                fx.guard(1, "alpha", 1, guardrail("allow", groups.clone())),
+                fx.guard(5, "gamma", 1, guardrail("allow", groups)),
+            ],
+        );
         let pretty = fx.run(&revert("alpha", "fin", &["--force", "--quiet"]));
         pretty.assert_success();
         assert_eq!(
@@ -768,8 +817,7 @@ mod topics_revert {
             "never quiet-suppressed"
         );
         assert_eq!(
-            fx.profile(&id(1)).unwrap()["policy"]["ai-security-profiles"][0]["model-configuration"]
-                ["model-protection"],
+            first["policy"]["ai-security-profiles"][0]["model-configuration"]["model-protection"],
             json!([])
         );
         let fx = world();

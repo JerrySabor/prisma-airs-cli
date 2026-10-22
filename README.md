@@ -29,8 +29,10 @@ in from `cdot/prisma-airs-cli-rs` (at `a9d7864`) and replaces it. The tree is st
 1.0.0. The next release is **8.0.0**, the first from this repository and one version on
 every channel (crates.io, npm, Homebrew, the Forgejo release and the docs site): it adds
 the `airs-cli` name and the npm channel described below, and ports the TypeScript CLI
-7.3.0 changes (directional runtime security profiles) on `scm-sdk` 1.0.1. There is no
-1.0.1 or 1.1.0 release.
+7.3.0 changes (directional runtime security profiles, accepted against a live tenant, see
+[Directional profiles](#directional-profiles-80)) on `scm-sdk` 0.2.4, the
+TypeScript SDK 0.35.0 overlay (`=0.2.4` from crates.io, DESIGN §15.25). There is no 1.0.1
+or 1.1.0 release.
 
 | Milestone | Commands |
 |---|---|
@@ -52,6 +54,7 @@ the `airs-cli` name and the npm channel described below, and ports the TypeScrip
 | M6e Gateway inference and report | `gateway inference chat/responses/embeddings`, `gateway report` (alias `dashboard`, the HTML environment report) |
 | M6e Gateway doctor | the doctor's `Gateway API` check |
 | M6f Supplychain (0.11) | `supplychain scans list/vulnerabilities`, `supplychain stats`, `supplychain rules list`, `supplychain report` (the HTML environment report) |
+| 8.0 TypeScript 7.3.0 port | directional security profiles on `runtime profiles create/update` (`--direction`, `--ai-profile-index`, `--[no-]enable-full-conversation-inspection`, `--no-mask-data-inline`, `--no-mask-data-in-storage`) and `runtime topics apply/revert`; the profile views, the runtime report and profile backup and restore read directions (supported, for single-entry profiles; see the known limitations below) |
 
 `markdown`, `csv` and `yaml` output are dropped, and so is `runtime dlp generate`. The
 TypeScript `aigateway` group is `gateway` here, with no `aigateway` alias, and `agentguard` is
@@ -122,8 +125,8 @@ ln -sf airs ~/.local/bin/airs-cli-rs
 
 `~/.local/bin` must be on `PATH`, and ahead of any other `airs` (see below).
 
-**From source:** the SDK, `scm-sdk` `=0.2.3`, comes from crates.io, so the first build
-needs access to the crates.io index.
+**From source:** every dependency, the SDK `scm-sdk` (`=0.2.4`) included, comes from
+crates.io.
 
 ```sh
 cargo build --release
@@ -334,7 +337,7 @@ airs runtime topics delete <topicId>                      # asks first (alias: r
 airs runtime topics delete <topicId> --force --updated-by me@example.com
 
 airs runtime profiles create --name prod-guard --prompt-injection block --toxic-content block
-airs runtime profiles create --name prod-guard --config profile.json   # the file's profile_name must be prod-guard
+airs runtime profiles create --config profile.json        # the file is the whole body; its profile_name names the profile
 airs runtime profiles update prod-guard --url-action alert             # merges into the latest revision
 airs runtime profiles update prod-guard --no-active
 airs runtime profiles delete prod-guard                   # asks first; by name or UUID (alias: rm)
@@ -346,19 +349,22 @@ airs runtime topics revert --profile prod-guard --name "Financial Advice"       
 
 - **Every check runs before the tenant is read.** Topic limits (UTF-8 bytes: name 100,
   description 250, 2–5 examples of 250, 1,000 together), UUIDs, `--updated-by` with
-  `--force`, a missing policy flag, `--max-inline-latency` (a whole number of seconds)
-  and `--dlp-profiles`/`--mask-data-inline` without `--dlp-action` are usage errors
-  (exit 2). `--config` files are read before the tenant too (at most 1 MiB, a UTF-8 JSON
-  object); `--config` cannot be combined with other body flags.
+  `--force`, a missing policy flag, `--max-inline-latency` (a whole number of seconds),
+  `--dlp-profiles`/`--[no-]mask-data-inline` without `--dlp-action` on a create, and the
+  `--direction`/`--ai-profile-index` values are usage errors (exit 2). `--config` files are
+  read and checked against the request schema before the tenant too (at most 1 MiB, a
+  UTF-8 JSON object); `--config` cannot be combined with any other write flag or
+  selector.
 - **A write is sent once.** It is never re-sent after a timeout or a 5xx, so a create
   can never be duplicated; only a 401 is replayed once with a fresh token. When the
   service may have applied a failed write, the error says
   `Outcome unknown: the topic may have been created.`; a reply that could not be read
   after a success says so too. Exit 1 in both cases.
 - **Updates change only what you ask for.** `profiles update` keeps `active` unless
-  `--active`/`--no-active` is given, keeps the DLP profiles when only `--dlp-action`
-  changes, and refuses an update with nothing to change. `topics create` and
-  `profiles update` act on the highest revision of a name.
+  `--active`/`--no-active` is given, merges detectors by name (keeping their severities
+  and topic lists), keeps the DLP profiles when only `--dlp-action` changes, writes an
+  explicit `false` for the `--no-…` flags, and refuses an update with nothing to change.
+  `topics create` and `profiles update` act on the highest revision of a name.
 - **Confirmations** (`delete` without `--force`) need stdin and stderr to be
   terminals; the prompt is on stderr and only `y`/`yes` confirms. In scripts pass
   `--force` (with `--updated-by <email>`, which selects the force endpoint).
@@ -369,15 +375,78 @@ airs runtime topics revert --profile prod-guard --name "Financial Advice"       
   write, so a change someone else makes to the profile between that read and the write
   is overwritten (the window is one round trip). `topics revert` removes the topic from
   the profile (the `topic-guardrails` entry goes with its last topic), then deletes the
-  topic with a plain delete. A topic that is still referenced (by another profile, or by
+  topic with a plain delete; a profile that does not reference the topic is refused
+  (exit 2) and nothing is deleted. A topic that is still referenced (by another profile, or by
   an older revision of this one, since every profile update creates a new revision) is
   kept with a warning and the command still exits 0; run `profiles cleanup`, then
   `topics delete`. It asks after looking the topic up.
-- **Output.** Outcome lines (`✓ Topic created: …`) go to stderr (`--quiet` hides them);
-  stdout carries only data: the topic record or the profile detail, in `pretty`,
-  `table` or `json` (the tenant's `defaultOutput` is not used). The deletes print no
-  data. The TypeScript CLI's hidden `--format` still works on `topics create`,
+- **Output.** Outcome lines (`✓ Topic created: …`, `Profile created: …`) go to stderr
+  (`--quiet` hides them); stdout carries only data: the topic record or the profile
+  detail, in `pretty`, `table` or `json` (the tenant's `defaultOutput` is used by
+  `profiles create` and `update` only, as in the TypeScript CLI 7.3.0). The deletes print
+  no data. The TypeScript CLI's hidden `--format` still works on `topics create`,
   `apply`, `revert` and `eval`, with its deprecation warning.
+
+### Directional profiles (8.0)
+
+A directional profile keeps its protections per direction (`prompt`, `response`,
+`tool-call`, `tool-response`) under `content-type-configurations`, and its shared settings
+(latency, storage masking, conversation inspection) in `model-configuration`. Legacy
+profiles need no migration. This follows the TypeScript CLI 7.3.0 and `scm-sdk` 0.2.4. A
+flag create writes the three directions it does not fill as empty objects, because the
+service requires all four direction keys (the TypeScript CLI writes only one, which the
+service refuses, D335).
+
+```sh
+airs runtime profiles create --name Directional --direction response \
+  --toxic-content 'high:block, moderate:allow' --no-enable-full-conversation-inspection
+airs runtime profiles update Directional --direction response --toxic-content 'high:block, moderate:block' --no-mask-data-inline
+airs runtime profiles update Directional --max-inline-latency 8 --no-mask-data-in-storage   # shared: no direction
+airs runtime profiles update Directional --config directional.json   # complete replacement (adds a direction)
+airs runtime topics apply --profile Directional --name Restricted --direction prompt
+airs runtime topics revert --profile Directional --name Restricted --direction prompt --force
+```
+
+- Protection edits on a directional profile need `--direction`, even with one direction,
+  and the direction must exist (add one with a complete `--config`). A legacy profile
+  refuses `--direction`; convert it with `--config`. Several AI entries need
+  `--ai-profile-index <n>` (zero-based), shared settings included.
+- These refusals come after the profile is read and write nothing (exit 2).
+- `topics revert --direction` refuses while another direction, AI entry or a retained
+  legacy block still references the topic.
+- `profiles get` shows `Protection locations`, and `DLP tenant` (json `dlpTenantId`) only when
+  the record carries one; in the live run no `get` or `list` returned it. Settings you do
+  not pass are never written; unknown directions are kept; a `--config`
+  file's new fields are checked before the tenant (a string `dlp_tenant_id`, never `null`).
+  `runtime report` adds a `Protection configurations` column, and profile backup and
+  restore carry every direction.
+
+#### Known limitations of directional profiles
+
+Directional profiles are **supported, for single-entry profiles**: a live run (2026-10-22)
+accepted every direction for creates, edits, topics, backup and restore.
+
+- **Not verified live:** profiles with several AI entries (`--ai-profile-index`), DLP blocks
+  inside a direction (`--dlp-action`, `--dlp-profiles`), and the runtime report's
+  `Protection configurations` column. The offline tests cover them.
+- **Service rules are not checked before sending, except one.** Every directional entry needs
+  all four direction keys (`prompt`, `response`, `tool-call`, `tool-response`; a flag create
+  writes the ones it does not fill as `{}`, and a `--config` body must list all four); the
+  `response` direction refuses `prompt-injection`; and `toxic-content` takes only `block` or
+  `allow` for each level. A write that breaks one fails with HTTP 400 (exit 1), and no
+  response body is shown. The exception (D336): a directional flag create with no protection
+  flag (none, or shared settings only) is refused before anything is sent (exit 2), because
+  the service refuses a policy with no protection in any direction. A `--config` body with
+  four empty directions is still sent, and refused.
+- **`dlp_tenant_id` on writes.** These writes do not send `dlp_tenant_id`: a flag
+  `profiles update`, `topics apply` and `revert`, `profiles restore` (create and overwrite),
+  and `profiles update --config` when the file leaves the key out. The service's answer then
+  reports `dlpTenantId: "none"`; the effect on the profile's stored DLP tenant binding is
+  unknown. No `get` or `list` returns the field, so the CLI cannot carry it over. This
+  matches the TypeScript CLI 7.3.0 and affects legacy profiles too. A `--config` file that
+  holds `dlp_tenant_id` sends it.
+
+The full guide is on the docs site: [Directional profiles](https://cdot65.github.io/prisma-airs-cli/commands/runtime-directional-profiles).
 
 ### Cleaning up old profile revisions
 
@@ -1082,7 +1151,7 @@ kept. stderr names the file (`  Debug: API log → <path>`, hidden by `--quiet`)
 is one attempt:
 
 ```json
-{"timestamp":"2026-10-17T11:03:44.500Z","durationMs":6,"operation":"airs.management.profiles.list","request":{"method":"GET","url":"https://api.apps.paloaltonetworks.com/aisec/v1/mgmt/profiles/tsg/100","headers":{"authorization":"***","service-name":"api","user-agent":"PAN-AIRS/0.2.3-rust-sdk"}},"response":{"status":200,"statusText":"OK","headers":{"content-type":"application/json"}}}
+{"timestamp":"2026-10-17T11:03:44.500Z","durationMs":6,"operation":"airs.management.profiles.list","request":{"method":"GET","url":"https://api.apps.paloaltonetworks.com/aisec/v1/mgmt/profiles/tsg/100","headers":{"authorization":"***","service-name":"api","user-agent":"PAN-AIRS/0.2.4-rust-sdk"}},"response":{"status":200,"statusText":"OK","headers":{"content-type":"application/json"}}}
 ```
 
 Header values outside a short allow-list (`content-type`, `user-agent`, `date`,

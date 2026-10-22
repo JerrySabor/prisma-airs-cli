@@ -2288,6 +2288,42 @@ mod contract {
         }
     }
 
+    /// The error-log query takes only `limit` (D300; scm-sdk 0.2.3 and 0.2.4 refuse
+    /// `skip` and `search`): there is no `--skip` flag, so `--skip` (the API name of
+    /// `--offset`) is clap's usage error naming it (exit 2, D1), before any tenant, token
+    /// or request, and is never sent or ignored.
+    #[test]
+    fn an_error_log_skip_is_a_usage_error_before_the_tenant() {
+        // A registered tenant on the fixture server, so "nothing sent" can fail.
+        let f = fx();
+        let target = fx::target_id(1);
+        for args in [
+            vec!["targets", "error-logs", target.as_str(), "--skip", "0"],
+            vec!["targets", "error-logs", target.as_str(), "--skip=10"],
+            vec![
+                "targets",
+                "error-logs",
+                target.as_str(),
+                "--limit",
+                "5",
+                "--skip",
+                "5",
+            ],
+        ] {
+            let mut full = vec!["redteam"];
+            full.extend(args.iter().copied());
+            let out = run(&rust(), &f.sandbox, &full, &RunOptions::new());
+            out.assert_code(2);
+            assert_eq!(out.stdout, "", "{args:?}");
+            assert!(
+                out.stderr.contains("unexpected argument '--skip"),
+                "{args:?}: {}",
+                out.stderr
+            );
+            assert_eq!(f.server.request_count(), 0, "{args:?}");
+        }
+    }
+
     /// The boundaries the contract accepts are sent as given: `--limit 100`, every
     /// status (`PARTIALLY_COMPLETE` included), every type (`CLARA` included), a target
     /// UUID; an empty filter still sends nothing.
@@ -2593,6 +2629,79 @@ mod management_0_86 {
         );
         assert_eq!(logs[0]["errorMessage"], "[withheld]");
         assert_eq!(logs[1]["errorMessage"], "[withheld]");
+    }
+
+    /// scm-sdk 0.2.3's `profiling_status` vocabulary (`NOT_STARTED`, `IN_PROGRESS`,
+    /// `COMPLETED`, `FAILED`) and an unknown value are accepted in every target answer the
+    /// CLI reads. The CLI prints none of them (the list row and the detail are the TS
+    /// projections) and sends no profiling or status filter (§15.24 choice 4): nothing is
+    /// translated into a filter.
+    #[test]
+    fn every_profiling_status_is_read_and_never_sent() {
+        let target = fx::target_id(1);
+        for status in [
+            "NOT_STARTED",
+            "IN_PROGRESS",
+            "COMPLETED",
+            "FAILED",
+            "FUTURE_STATE",
+        ] {
+            let f = seeded();
+            f.server.redteam(|data| {
+                data.targets[0]["profiling_status"] = json!(status);
+                data.targets[1]["profiling_status"] = json!(status);
+            });
+            let list = f.rt(&["targets", "list", "--output", "json"]);
+            list.assert_success();
+            assert_eq!(list.json().as_array().map(Vec::len), Some(2), "{status}");
+            let get = f.rt(&["targets", "get", &target, "--output", "json"]);
+            get.assert_success();
+            assert_eq!(get.json()["name"], "Vertex Realtime", "{status}");
+            assert_eq!(
+                f.api(),
+                [
+                    "GET /redteam/mgmt/v1/target?skip=0&limit=100".to_owned(),
+                    format!("GET /redteam/mgmt/v1/target/{target}")
+                ],
+                "{status}"
+            );
+        }
+    }
+
+    /// The 0.86.0 unions are closed (scm-sdk 0.2.3/0.2.4 keep TypeScript's response
+    /// schema; the typed `Unknown` fallback applies only to accepted documents): an
+    /// unfamiliar `multi_turn_config` type or `target_connection_config` shape fails the
+    /// read with the D38 text (exit 1, nothing printed), also inside a backup, where the
+    /// target is a failed row and the run exits 1 (DESIGN §15.25 "Cumulative migrations").
+    #[test]
+    fn unknown_union_shapes_fail_the_response_schema() {
+        let target = fx::target_id(1);
+        for (key, value) in [
+            (
+                "multi_turn_config",
+                json!({"type": "future_session", "window": 3}),
+            ),
+            (
+                "target_connection_config",
+                json!({"future_region": "eu-west", "future_options": {"warm": true}}),
+            ),
+        ] {
+            let f = seeded();
+            f.server.redteam(|data| {
+                data.targets[0]["connection_params"][key] = value.clone();
+            });
+            let out = f.rt(&["targets", "get", &target, "--output", "json"]);
+            out.assert_code(1);
+            assert_eq!(out.stdout, "", "{key}");
+            assert!(
+                out.stderr.contains(
+                    "AISEC_RESPONSE_VALIDATION:Response did not match the expected schema"
+                ),
+                "{key}: {}",
+                out.stderr
+            );
+            assert_eq!(f.api(), [format!("GET /redteam/mgmt/v1/target/{target}")]);
+        }
     }
 
     /// The listing reads rows carrying the 0.86.0 vocabulary (`VERTEX_AI`, `N8N`, the
