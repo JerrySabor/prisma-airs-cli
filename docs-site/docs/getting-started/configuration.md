@@ -1,126 +1,120 @@
 ---
-title: Configuration
+title: Configuration and tenants
+sidebar_position: 3
 ---
 
-# Configuration
+# Configuration and tenants
 
-Prisma AIRS CLI is configured entirely through **tenants**. A tenant is a private JSON file
-holding one set of SCM OAuth credentials (client ID, secret, TSG ID) plus any optional
-settings, registered under a name. Exactly one tenant is selected at a time, and every command
-reads only that file. Environment variables are never consulted.
+`airs` has one configuration source: **tenants** in its own store. Every command that talks
+to Prisma AIRS uses the selected tenant (or the one named by `--tenant <name>` for a single
+invocation). Credentials and endpoints never come from environment variables.
 
-## Config Cascade
+## Where tenants live
 
-Settings are resolved in priority order (highest wins):
+The store is the first of:
 
-```
-CLI flags  >  Selected tenant's config file  >  Zod defaults
-```
+1. `$AIRS_CLI_CONFIG_DIR`
+2. `$XDG_CONFIG_HOME/airs-cli`
+3. `~/.config/airs-cli`
 
-## First-time setup
+It holds `config.toml` (the selection and each tenant's pinned TSG) and
+`tenants/<name>.toml` (that tenant's settings, secrets included). Files are mode 0600 and
+directories 0700; a file that is a symlink, owned by someone else or readable by group or
+others is refused, and so is a directory that others can write. Only the tenant write
+commands and `tenant import` change the store. Every change takes one lock
+(`config.lock`; a second change waits up to 5 s and then names the process holding it) and
+replaces files atomically, so a reader never sees a half-written file.
 
-```bash
-airs-cli tenant create development     # prompts for TSG ID, client ID, and a hidden client secret
-airs-cli tenant switch development     # every command now uses this tenant
-airs-cli doctor                        # verify the file, credentials, and connectivity
-```
+## Creating and selecting a tenant
 
-For scanning, add the runtime key with a hidden prompt:
-
-```bash
-airs-cli tenant set development airsApiKey
-```
-
-Already have a JSON file? Register it without copying or editing it:
-
-```bash
-airs-cli tenant create production --config /secure/production.json
+```sh
+airs tenant create development           # prompts for the TSG ID, client ID and (hidden) client secret
+printf '%s\n' "$SECRET" | airs tenant create ci --tsg-id 1234567890 --client-id ci-client --client-secret-stdin
+airs tenant switch development           # select it for later commands
+airs tenant list                         # every tenant, no credentials read (alias: ls)
+airs --tenant ci doctor                  # use another tenant for one invocation
 ```
 
-## Managing settings
+Coming from the TypeScript CLI? Copy its tenants with `airs tenant import`
+([Upgrading from 7.x](./upgrading-from-typescript.md)).
 
-`airs-cli tenant` covers every read and write:
+## Editing settings
 
-```bash
-airs-cli tenant read                          # all settings of the selected tenant, secrets redacted
-airs-cli tenant get development scanConcurrency
-airs-cli tenant set development scanConcurrency 3
-airs-cli tenant set development defaultOutput json
-airs-cli tenant set development mgmtClientSecret --stdin < /secure/rotated-secret.txt
-airs-cli tenant set development typesafeApiKey    # hidden prompt; enables redteam judge
-airs-cli tenant unset development defaultOutput   # defaults take over
-airs-cli tenant path                          # print the selected tenant's file path
+```sh
+airs tenant set development defaultOutput json
+airs tenant set development airsApiKey                    # secrets: a hidden prompt ...
+printf '%s\n' "$KEY" | airs tenant set development airsApiKey --stdin   # ... or stdin
+airs tenant set development mgmtTsgId 2345678901          # changes the TSG and its pin
+airs tenant unset development defaultOutput               # credentials cannot be cleared
+airs tenant read                                          # Key │ Value, secrets [REDACTED]
+airs tenant get development mgmtTsgId --output json
+airs tenant path                                          # the selected tenant's file
+airs tenant delete development                            # asks first; --force skips the question
 ```
 
-- **`set`** validates the value through the schema before writing; invalid values are rejected
-  and nothing is written. Credentials never go on the command line: omit the value for a hidden
-  prompt or pipe it with `--stdin`. The registered `mgmtTsgId` is pinned.
-- **`unset`** removes a key so the schema default applies; credential keys cannot be cleared.
-- **`get`** and **`read`** redact every key whose name ends in `key`, `secret`, `token`, or
-  `password`. There is intentionally no `--reveal`.
-- **`path`** prints only the file path, which is pipe-friendly.
+- **Values are checked when you enter them.** Numbers are decimal integers in range,
+  endpoints must be https (http only for loopback hosts) without credentials, a query or a
+  fragment, `mgmtTsgId` is 1–32 digits, and `defaultOutput` is `pretty`, `table` or
+  `json`. An empty value is refused; use `tenant unset` to remove a setting.
+- **Secrets never go on the command line.** `tenant set <name> <secret key> <value>` is
+  refused; omit the value for a hidden prompt, or pipe it with `--stdin`. Prompts need
+  stdin and stderr to be terminals.
+- **Wrong-tenant protection.** A tenant file whose `mgmtTsgId` differs from the TSG pinned
+  in `config.toml` is refused; `tenant set <name> mgmtTsgId <tsg>` changes both.
+- **Deleting** removes the tenant's file and clears the selection if it was selected.
+  Without a terminal it needs `--force`.
 
-Keys and defaults are listed in [configuration options](../reference/configuration.md).
-Multi-tenant workflows, automation, and the registry layout are in
-[tenant selection](../cli/tenant.md).
+## Settings
 
-## Tuning Parameters
+| Key | Purpose |
+|---|---|
+| `airsApiKey`, `airsApiToken` | scanning credentials (secret) |
+| `airsApiEndpoint`, `airsNumRetries` | scan API endpoint and retries (0–5) |
+| `mgmtClientId`, `mgmtClientSecret`, `mgmtTsgId` | the management OAuth credentials |
+| `mgmtEndpoint`, `mgmtDashboardEndpoint`, `mgmtTokenEndpoint` | management, dashboard and token endpoints |
+| `dlpEndpoint` | DLP API |
+| `redTeamDataEndpoint`, `redTeamMgmtEndpoint`, `redTeamNetworkBrokerEndpoint` | AI Red Teaming APIs |
+| `modelSecDataEndpoint`, `modelSecMgmtEndpoint` | AI Model Security APIs |
+| `supplychainDataEndpoint`, `supplychainMgmtEndpoint` | AI Supply Chain APIs |
+| `gatewayDataEndpoint`, `gatewayAdminEndpoint`, `iamEndpoint` | AI Gateway data and admin planes, IAM |
+| `gatewayInferenceEndpoint`, `gatewayInferenceApiKey`, `gatewayInferenceModel`, `gatewayEmbeddingModel` | `gateway inference` (the API key is secret) |
+| `scanConcurrency` | carried over from the TypeScript CLI, 1–20 (default 5); `runtime topics eval` takes `--concurrency` |
+| `defaultOutput` | `pretty`, `table` or `json` |
 
-| Config Key | Default | What it does |
-|-----------|---------|-------------|
-| `scanConcurrency` | `5` | Parallel scan requests per batch (1--20) |
-| `dataDir` | `~/.prisma-airs/runs` | Bulk-scan state directory |
-| `defaultOutput` | `pretty` | Default read format: `pretty`, `table`, `markdown`, `csv`, `json`, or `yaml` |
+Every endpoint is optional; without it the default Prisma AIRS endpoint is used. An
+unknown key makes the tenant file invalid.
 
-:::tip[Concurrency vs. rate limits]
-Keep `scanConcurrency` at 5 or lower to avoid AIRS rate limiting. Increase only if your tenant has elevated quotas.
-:::
+## Two credential planes
 
-## Data Locations
+- **Management** commands (profiles, topics, DLP, red team, model security, gateway,
+  supply chain, API keys, reports, backups) authenticate with OAuth client credentials:
+  `mgmtClientId`, `mgmtClientSecret` and `mgmtTsgId`.
+- **Scanning** (`runtime scan`, `runtime bulk-scan`, `runtime resume-poll`,
+  `runtime topics eval`) uses `airsApiKey` or `airsApiToken`.
+- **Gateway inference** uses `gatewayInferenceApiKey`.
 
-| Path | Purpose |
-|------|---------|
-| `~/.local/state/prisma-airs/tenants.json` | Tenant registry (names, file paths, TSG IDs; never credentials) |
-| `~/.local/state/prisma-airs/configs/` | Config files created by `airs-cli tenant create` (mode `0600`) |
-| `~/.prisma-airs/runs/` | Bulk-scan state (`dataDir`) |
+Neither plane sends the other's credentials, and each command requires only its own.
 
-## OAuth fetch failures inside an agent
+## Environment variables
 
-`AISEC_OAUTH_ERROR: Token request failed: fetch failed` means the token request
-failed at the transport step. It does not establish invalid credentials or a
-Gateway permission denial. DNS, TLS trust, proxy configuration, endpoint
-reachability, or the agent's shell sandbox may be responsible. A successful local
-configuration check establishes only that settings are present and valid.
+Configuration comes only from tenant files. Credential and endpoint variables (`PANW_*`,
+`PRISMA_AIRS_CONFIG_PATH` and the other retired TypeScript names) are ignored; `airs doctor`
+lists the ones that are still set. The variables that do matter:
 
-For an already-authorized read, request the agent host's supported **per-command
-network approval**, then retry the same command once. If that mechanism is
-unavailable or denied, report the execution restriction. Do not disable the
-sandbox, replace credentials, or change API planes to make the error disappear.
-A command-prefix approval alone may not grant network access.
+| Variable | Effect |
+|---|---|
+| `AIRS_CLI_CONFIG_DIR`, `XDG_CONFIG_HOME` | where the tenant store lives |
+| `XDG_STATE_HOME` | where bulk-scan state and debug logs live (`$XDG_STATE_HOME/airs-cli/`) |
+| `XDG_DATA_HOME` | where `model-security install --fetch-uv` keeps uv |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` (and lower case) | proxies for https endpoints; macOS system proxies are honoured too |
+| `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE` | colour |
+| `PRISMA_AIRS_TENANTS_PATH` | only where `tenant import` finds the TypeScript registry |
 
-If the approved request still fails, compare the same read from a normal terminal
-on the same host, using the same managed CLI and selected product tenant. Inspect
-DNS, proxy and certificate trust for the configured OAuth endpoint. Report only
-sanitized error codes and outcomes; never print tokens, secrets or raw tenant
-files. Do not disable TLS verification.
+## Checking a tenant
 
-An HTTP rejection from the token endpoint requires authentication diagnosis;
-a Gateway API 403 after token acquisition requires permission diagnosis. Neither
-is equivalent to a token fetch failure. An empty successful list is a valid
-result, while a failed request provides no inventory or pagination evidence.
+```sh
+airs doctor
+airs doctor --output json | jq '.[] | select(.status != "pass")'
+```
 
-## Product credentials and Harness credentials
-
-`airs cli doctor` runs product CLI diagnostics for the selected **tenant**.
-`airs doctor` and in-session `/doctor` inspect the selected **Harness environment**.
-These are different credential scopes; environment names need not match tenants
-or Gateway workspaces.
-
-The standalone CLI reads scanner and TypeSafe keys from its tenant configuration.
-Missing scanner credentials disable scanner-dependent commands, not Gateway
-management reads. A CLI report that TypeSafe is not configured does not prove
-that the Harness environment has no saved Jev key. The bundled ASR skill resolves
-that key through its native environment credential helper and passes it only to
-the judge child process. Use `/typesafe` and the installed
-`$prisma-airs-asr-judge` skill for this workflow; do not copy the saved key into the
-tenant file to satisfy a diagnostic. See [judge authentication](../cli/redteam/judge.md).
+See [doctor](../commands/doctor.md).

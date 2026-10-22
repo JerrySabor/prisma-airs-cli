@@ -1,0 +1,19 @@
+{
+  "version": {
+    "id": 1,
+    "crate": "airs-cli",
+    "num": "1.0.0",
+    "dl_path": "/api/v1/crates/airs-cli/1.0.0/download",
+    "readme_path": "/api/v1/crates/airs-cli/1.0.0/readme",
+    "checksum": "952a1b3582f98b3f6a3905961058383445aa07e298b51805f5e08e53b7a5589d",
+    "yanked": false,
+    "yank_message": null,
+    "license": "Apache-2.0",
+    "crate_size": 1,
+    "rust_version": "1.89",
+    "bin_names": ["airs", "airs-cli", "airs-cli-rs"],
+    "created_at": "2026-10-20T00:00:00.000000Z",
+    "updated_at": "2026-10-20T00:00:00.000000Z"
+  },
+  "_comment": "A synthetic crates.io version answer for tests/homebrew_formula.rs; the checksum is the fixture's, not a real crate's."
+}
