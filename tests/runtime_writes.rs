@@ -1837,8 +1837,10 @@ mod debug {
         assert!(!text.contains("a new topic"), "no request body");
     }
 
-    /// 8.0 (scm-sdk 0.2.4): a directional create and update log the SDK operation names
-    /// unchanged and neither the policy nor the `dlp_tenant_id` they send.
+    /// 8.0 (scm-sdk 0.2.4): a directional create and a directional flag update log the SDK
+    /// operation names unchanged (the update's lookup walk `airs.management.profiles.list`,
+    /// then `airs.management.profiles.update`) and neither the policy nor the
+    /// `dlp_tenant_id` they send.
     #[test]
     fn directional_writes_log_their_operation_names_and_no_body() {
         let fx = world();
@@ -1875,6 +1877,40 @@ mod debug {
             "content-type-configurations",
             "sensitive content",
         ] {
+            assert!(!text.contains(secret), "{secret} in the debug log");
+        }
+        let log = airs_test_harness::debug_log::log_dir(&fx.sandbox);
+        std::fs::remove_dir_all(&log).unwrap();
+        fx.run_with(
+            &[
+                "runtime",
+                "profiles",
+                "update",
+                "550e8400-e29b-41d4-a716-446655440000",
+                "--direction",
+                "response",
+                "--toxic-content",
+                "alert",
+                "--debug",
+            ],
+            &options,
+        )
+        .assert_success();
+        let (_, records) = airs_test_harness::debug_log::only_log(&fx.sandbox);
+        let operations: Vec<&str> = records
+            .iter()
+            .filter_map(|record| record["operation"].as_str())
+            .collect();
+        assert_eq!(
+            operations,
+            [
+                "oauth.token",
+                "airs.management.profiles.list",
+                "airs.management.profiles.update"
+            ]
+        );
+        let text = serde_json::to_string(&records).unwrap();
+        for secret in ["content-type-configurations", "toxic-content"] {
             assert!(!text.contains(secret), "{secret} in the debug log");
         }
     }

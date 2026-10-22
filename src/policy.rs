@@ -1076,6 +1076,29 @@ mod tests {
             })
         );
         assert!(request_body(request).is_some());
+        // Each of the four directions under its exact wire key, and only that one (the
+        // shared settings an empty `model-configuration`, as TS 7.3.0 builds it).
+        for direction in ["prompt", "response", "tool-call", "tool-response"] {
+            let request = create_request(
+                "Directional",
+                true,
+                &flags(|raw| raw.prompt_injection = Some("alert".into())),
+                Some(direction),
+            );
+            let entry = &request["policy"]["ai-security-profiles"][0];
+            assert_eq!(
+                entry["content-type-configurations"],
+                json!({direction: {"model-protection": [{"name": "prompt-injection", "action": "alert"}]}}),
+                "{direction}"
+            );
+            assert_eq!(entry["model-configuration"], json!({}), "{direction}");
+            let typed = request_body(request.clone()).expect("a valid body");
+            assert_eq!(
+                serde_json::to_value(&typed).unwrap(),
+                request,
+                "{direction}"
+            );
+        }
         let malicious = create_request(
             "Directional",
             true,

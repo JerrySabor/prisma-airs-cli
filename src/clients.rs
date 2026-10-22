@@ -1320,6 +1320,65 @@ mod tests {
         );
     }
 
+    /// scm-sdk 0.2.3/0.2.4 keep the `api.apps` defaults and migrate nothing to
+    /// `api.sase`; the CLI does the same (§15.24, §15.25): without a tenant value each red
+    /// team plane is the SDK's `api.apps` default, and a configured endpoint, an
+    /// `api.sase` one included, is used exactly as written.
+    #[test]
+    fn red_team_endpoints_are_the_defaults_or_the_tenant_values_unchanged() {
+        let session = Session::new();
+        let secrets = SecretSet::default();
+        let planes = |clients: &RedTeamClients| {
+            let url = |client: &Client| client.endpoint().url().as_str().to_owned();
+            [
+                url(clients.red_team.client()),
+                url(clients.red_team.targets().client()),
+            ]
+        };
+        let defaults = config(r#"{"mgmtClientId":"c","mgmtClientSecret":"s","mgmtTsgId":"1"}"#);
+        let clients = RedTeamClients::build(&defaults, &session, &secrets, None).unwrap();
+        let [data, management] = planes(&clients);
+        assert_eq!(
+            data.trim_end_matches('/'),
+            scm::constants::DEFAULT_RED_TEAM_DATA_ENDPOINT
+        );
+        assert_eq!(
+            management.trim_end_matches('/'),
+            scm::constants::DEFAULT_RED_TEAM_MGMT_ENDPOINT
+        );
+        for (ours, sdk) in [
+            (
+                DEFAULT_RED_TEAM_DATA_ENDPOINT,
+                scm::constants::DEFAULT_RED_TEAM_DATA_ENDPOINT,
+            ),
+            (
+                DEFAULT_RED_TEAM_MGMT_ENDPOINT,
+                scm::constants::DEFAULT_RED_TEAM_MGMT_ENDPOINT,
+            ),
+            (
+                DEFAULT_RED_TEAM_BROKER_ENDPOINT,
+                scm::constants::DEFAULT_RED_TEAM_NETWORK_BROKER_ENDPOINT,
+            ),
+            (DEFAULT_MGMT_ENDPOINT, scm::constants::DEFAULT_MGMT_ENDPOINT),
+        ] {
+            assert_eq!(ours, sdk);
+            assert!(ours.starts_with("https://api.apps.paloaltonetworks.com/"));
+        }
+        let sase = config(
+            r#"{"mgmtClientId":"c","mgmtClientSecret":"s","mgmtTsgId":"1","redTeamDataEndpoint":"https://api.sase.paloaltonetworks.com/ai-red-teaming/data","redTeamMgmtEndpoint":"https://api.sase.paloaltonetworks.com/ai-red-teaming/mgmt"}"#,
+        );
+        let clients = RedTeamClients::build(&sase, &session, &secrets, None).unwrap();
+        let [data, management] = planes(&clients);
+        assert_eq!(
+            data.trim_end_matches('/'),
+            "https://api.sase.paloaltonetworks.com/ai-red-teaming/data"
+        );
+        assert_eq!(
+            management.trim_end_matches('/'),
+            "https://api.sase.paloaltonetworks.com/ai-red-teaming/mgmt"
+        );
+    }
+
     /// DESIGN §16.3: the DLP base is only the tenant's `dlpEndpoint`, else the SDK
     /// default (TS `client-wiring.spec.ts`); a bad value names the key.
     #[test]

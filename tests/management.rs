@@ -2812,3 +2812,138 @@ mod review_fixes {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// scm-sdk 0.2.4: directional records read losslessly on every page (§15.25)
+// ---------------------------------------------------------------------------
+
+mod sdk_0_2_4_pages {
+    use super::*;
+
+    /// The TypeScript 7.3.0 directional fixture as `name` (id `uuid(n)`, `revision`),
+    /// with the values scm-sdk 0.2.4 keeps only through its tolerant response binding: an
+    /// unknown direction with an unknown member, an unknown mode, a `null` inspection
+    /// setting, a `null` `dlp_tenant_id` and an unknown top-level key.
+    fn unusual(n: u64, name: &str, revision: u64) -> Value {
+        let mut profile = fixtures::runtime::directional_profile();
+        profile["profile_id"] = json!(fixtures::uuid(n));
+        profile["profile_name"] = json!(name);
+        profile["revision"] = json!(revision);
+        profile["dlp_tenant_id"] = Value::Null;
+        profile["extra_top_level"] = json!({"kept": [1, null]});
+        let ai = &mut profile["policy"]["ai-security-profiles"][0];
+        ai["content-type-mode"] = json!("per_modality");
+        ai["content-type-configurations"]["audio"] = json!({"model-protection": [{"name": "future-detector", "action": "alert"}], "future": null});
+        ai["content-type-configurations"]
+            .as_object_mut()
+            .unwrap()
+            .remove("tool-call");
+        ai["model-configuration"]["enable-full-conversation-inspection"] = Value::Null;
+        profile
+    }
+
+    /// 150 minimal records with the directional ones placed so that each walk needs its
+    /// second page: `Near` (the plain fixture: a string `dlp_tenant_id`, an explicit
+    /// `false`) at index 5, `Twice` revision 1 at index 10 and revision 2 at index 140,
+    /// `Far` at index 130.
+    fn rows() -> Vec<Value> {
+        let mut rows: Vec<Value> = (0..150)
+            .map(|n| minimal_profile(&format!("p{n}"), 1))
+            .collect();
+        let mut near = fixtures::runtime::directional_profile();
+        near["profile_id"] = json!(fixtures::uuid(901));
+        near["profile_name"] = json!("Near");
+        rows[5] = near;
+        rows[10] = unusual(902, "Twice", 1);
+        rows[130] = unusual(903, "Far", 1);
+        rows[140] = unusual(904, "Twice", 2);
+        rows
+    }
+
+    /// The printed JSON keeps the record's policy and `dlp_tenant_id` exactly (`null`
+    /// included); it is the §7.5 projection, so the unknown top-level key, `csp_id` and
+    /// `tsg_id` are not printed (`profiles backup` keeps them, D215).
+    fn assert_printed(printed: &Value, record: &Value) {
+        assert_eq!(printed["profileName"], record["profile_name"]);
+        assert_eq!(printed["policy"], record["policy"]);
+        assert_eq!(printed.get("dlpTenantId"), record.get("dlp_tenant_id"));
+        for absent in ["extra_top_level", "extraTopLevel", "tsg_id", "csp_id"] {
+            assert!(printed.get(absent).is_none(), "{absent}: {printed}");
+        }
+    }
+
+    /// `list --all` prints the page-2 record as sent, and every page is read.
+    #[test]
+    fn list_all_prints_every_page_losslessly() {
+        let f = fx();
+        let rows = rows();
+        f.profiles(rows.clone());
+        let out = f.run(&with(LIST, &["--all"]));
+        out.assert_success();
+        let printed = out.json();
+        let named = |name: &str| {
+            printed
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["profileName"] == name)
+                .cloned()
+                .unwrap()
+        };
+        assert_printed(&named("Near"), &rows[5]);
+        assert_printed(&named("Far"), &rows[130]);
+        assert_eq!(
+            named("Near")["policy"]["ai-security-profiles"][0]["model-configuration"]["enable-full-conversation-inspection"],
+            json!(false)
+        );
+        assert_eq!(
+            f.lines(),
+            expect(&[
+                profiles_q("offset=0&limit=100&latest=true"),
+                profiles_q("offset=100&limit=100&latest=true"),
+            ])
+        );
+    }
+
+    /// `get <name>` finds the record on page 2 of its walk; `get --all-versions` prints
+    /// both revisions, one per page, as sent.
+    #[test]
+    fn get_walks_print_page_two_losslessly() {
+        let f = fx();
+        let rows = rows();
+        f.profiles(rows.clone());
+        let out = f.run(&["runtime", "profiles", "get", "Far", "--output", "json"]);
+        out.assert_success();
+        assert_printed(&out.json(), &rows[130]);
+        assert_eq!(
+            f.lines(),
+            expect(&[
+                profiles_q("offset=0&limit=100"),
+                profiles_q("offset=100&limit=100"),
+            ])
+        );
+        f.server.clear_requests();
+        let out = f.run(&[
+            "runtime",
+            "profiles",
+            "get",
+            "Twice",
+            "--all-versions",
+            "--output",
+            "json",
+        ]);
+        out.assert_success();
+        let printed = out.json();
+        let printed = printed.as_array().unwrap();
+        assert_eq!(printed.len(), 2);
+        assert_printed(&printed[0], &rows[10]);
+        assert_printed(&printed[1], &rows[140]);
+        assert_eq!(
+            f.lines(),
+            expect(&[
+                profiles_q("offset=0&limit=100&latest=false"),
+                profiles_q("offset=100&limit=100&latest=false"),
+            ])
+        );
+    }
+}

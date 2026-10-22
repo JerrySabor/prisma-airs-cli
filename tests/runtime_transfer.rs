@@ -619,6 +619,78 @@ mod backup {
         assert!(records[1].get("dlp_tenant_id").is_some_and(Value::is_null));
     }
 
+    /// 8.0 (scm-sdk 0.2.4, §15.25): every page of the walk is read without the response
+    /// defaults and stored as sent. Directional records on both pages (an explicit `false`,
+    /// a string or `null` `dlp_tenant_id`, an unknown direction and mode, a `null`
+    /// inspection setting, an unknown top-level key, an omitted direction) are stored
+    /// as the same JSON values. (`--debug` is refused for the transfer commands, D156; the
+    /// page reads are the SDK's `airs.management.profiles.list`.)
+    #[test]
+    fn directional_records_are_stored_losslessly_on_every_page() {
+        let f = fx(SOURCE);
+        let mut rows: Vec<Value> = (0..150)
+            .map(|n| {
+                let mut row = fixtures::profile(100 + n, &format!("P{n:03}"), 1);
+                row["tsg_id"] = json!(SOURCE);
+                row
+            })
+            .collect();
+        let directional = |n: u64, name: &str| {
+            let mut profile = fixtures::runtime::directional_profile();
+            profile["profile_id"] = json!(fixtures::uuid(n));
+            profile["profile_name"] = json!(name);
+            profile["tsg_id"] = json!(SOURCE);
+            profile
+        };
+        rows[7] = directional(901, "Near");
+        let mut far = directional(902, "Far");
+        far["dlp_tenant_id"] = Value::Null;
+        far["extra_top_level"] = json!({"kept": [1, null]});
+        let ai = &mut far["policy"]["ai-security-profiles"][0];
+        ai["content-type-mode"] = json!("per_modality");
+        ai["content-type-configurations"]["audio"] =
+            json!({"model-protection": [{"name": "future-detector", "action": "alert"}]});
+        ai["content-type-configurations"]
+            .as_object_mut()
+            .unwrap()
+            .remove("tool-response");
+        ai["model-configuration"]["enable-full-conversation-inspection"] = Value::Null;
+        rows[142] = far;
+        f.server.set_profiles(SOURCE, rows.clone());
+        f.server.set_topics(SOURCE, Vec::new());
+        let path = f.tmp("pages.json");
+        f.profiles(&["backup", "--output-file", &path])
+            .assert_success();
+        assert_eq!(
+            f.api(),
+            [
+                PROFILES_100,
+                "GET /aisec/v1/mgmt/profiles/tsg/100?offset=100&limit=100&latest=true"
+            ]
+        );
+        let file = json_of(&path);
+        let stored: Vec<&Value> = file["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| &entry["record"])
+            .collect();
+        assert_eq!(stored.len(), 150);
+        for (index, name) in [(7, "Near"), (142, "Far")] {
+            let record = stored
+                .iter()
+                .find(|record| record["profile_name"] == name)
+                .unwrap();
+            assert_eq!(*record, &rows[index], "{name}");
+        }
+        let far = stored
+            .iter()
+            .find(|record| record["profile_name"] == "Far")
+            .unwrap();
+        assert!(far.get("dlp_tenant_id").is_some_and(Value::is_null));
+        assert_eq!(far["extra_top_level"], json!({"kept": [1, null]}));
+    }
+
     /// A failed read is its §6 message; a 5xx is retried by the SDK (reads).
     #[test]
     fn read_failures() {

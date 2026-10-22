@@ -367,6 +367,16 @@ mod tests {
     use super::*;
     use serde::Serialize;
 
+    /// The build-graph guard (DESIGN §15.25 point 5): `serde_json` is built without
+    /// `preserve_order`, so its `Map` sorts keys. If feature unification ever enabled it
+    /// (a dependency or a feature of this workspace), SDK wire bytes would change and this
+    /// test fails first.
+    #[test]
+    fn serde_json_is_built_without_preserve_order() {
+        let value: serde_json::Value = serde_json::from_str(r#"{"b":1,"c":2,"a":3}"#).unwrap();
+        assert_eq!(value.to_string(), r#"{"a":3,"b":1,"c":2}"#);
+    }
+
     #[test]
     fn keeps_key_order_and_resolves_duplicates_like_json_parse() {
         let value = parse(r#"{"b":1,"a":2,"b":3}"#).unwrap();
