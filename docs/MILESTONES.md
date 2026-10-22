@@ -72,7 +72,7 @@ doctor checks, report titles and config keys.
 | 0.10 | M6e Gateway | done | `gateway` (renamed); `gateway report`; doctor "Gateway API" check |
 | 0.11 | M6f Supplychain | done | `supplychain` (renamed); `supplychain report`; G71 tolerant scan read |
 | 1.0 | Rename and distribution | done | Executable invoked as `airs` (product, crate and repo stay airs-cli), with an `airs-cli-rs` compatibility name; Homebrew tap. (The crate has been on crates.io as `airs-cli` since 0.3.1.) The contract is DESIGN §21 (D326; D73 extended): chunk 1 the rename across code, help, messages, tests and docs; chunk 2 distribution (release tarballs `airs-cli-<version>-<target>.tar.gz` with the compatibility link, the Homebrew formula built from the crates.io crate and its script, RELEASING, README install); scm-sdk `=0.2.3` with the same features (the red team management 0.86.0 update: D327–D329, D35 extended; DESIGN §15.24) |
-| 8.0 | The move and the TypeScript 7.3.0 port | in progress | Part A: the Rust CLI moves into `cdot/prisma-airs-cli` (the `airs-cli` name, npm, the docs site; DESIGN §21.15–§21.17). Part B (this port, DESIGN §13.17, §15.25): the reference moves to tag `v7.3.0` (TESTING §3.4); scm-sdk 0.2.4 (the TypeScript 0.35.0 overlay; a temporary git pin of `4825616` until it is on crates.io); directional security profiles on `profiles create\|update` and `topics apply\|revert`, the 7.3.0 merge, output and revert rules, the views, the runtime report and profile transfer; D332–D333 added, D117 retired, D26, D50, D93, D94, D96, D98–D103, D106, D115 and D116 reworded. Done offline (fmt, clippy, the full parity suite); left: the bounded live run per direction (B7, decision 10), the adversarial review, then Part C (the 8.0.0 release on every channel). Directional profiles stay experimental until the live run accepts them |
+| 8.0 | The move and the TypeScript 7.3.0 port | in progress | Part A: the Rust CLI moves into `cdot/prisma-airs-cli` (the `airs-cli` name, npm, the docs site; DESIGN §21.15–§21.17). Part B (this port, DESIGN §13.17, §15.25): the reference moves to tag `v7.3.0` (TESTING §3.4); scm-sdk 0.2.4 (the TypeScript 0.35.0 overlay, `=0.2.4` from crates.io); directional security profiles on `profiles create\|update` and `topics apply\|revert`, the 7.3.0 merge, output and revert rules, the views, the runtime report and profile transfer; D332–D334 added, D117 retired, D26, D50, D93, D94, D96, D98–D103, D106, D115 and D116 reworded. Done offline (fmt, clippy, the full parity suite); left: the bounded live run per direction (B7, decision 10), the adversarial review, then Part C (the 8.0.0 release on every channel). Directional profiles stay experimental until the live run accepts them |
 
 ## Definition of done for a milestone
 
@@ -374,17 +374,21 @@ From 1.0 (DESIGN §21), each stable release is also done when:
   redaction check. DESIGN §15.24 choices 1–15.
 - **8.0 the TypeScript 7.3.0 port (Part B).** The reference moves to tag `v7.3.0` (`7a54e46`, TS SDK 0.35.0), the final
   move (TESTING §3.4); against it the unchanged tree failed 22 tests (the version, the profile and topic writes, the
-  profile detail), each classified into a port, a reworded or retired row, or a new row. scm-sdk 0.2.4's overlay is
-  adopted from its exact Forgejo commit `4825616` until it is on crates.io (DESIGN §15.25: the features are unchanged;
-  `Cargo.lock` changes `scm-sdk` and, per the SDK's advisory, `rustls-webpki` and `webpki-root-certs`). The port
+  profile detail), each classified into a port, a reworded or retired row, or a new row. scm-sdk 0.2.4's overlay was
+  first adopted from its exact Forgejo commit `4825616`, then, once published, as `=0.2.4` from crates.io (DESIGN
+  §15.25: the published sources are that commit's; the features are unchanged; `Cargo.lock` changes `scm-sdk` and, per
+  the SDK's advisory, `rustls-webpki` and `webpki-root-certs`; `cargo audit` is clean). The port
   (DESIGN §13.17): `--direction`, `--ai-profile-index` and the 7.3.0 flags on `profiles create|update` and `topics
   apply|revert`; TS 7.3.0's builder, recursive merge, layout refusals (exit 2), `--config` rules, status lines,
   banner-less detail and tenant `defaultOutput`; every profile body validated with the TypeScript 0.35.0 request
   root; the profile views (`dlpTenantId`, `DLP tenant`, `Protection locations`, TS 0.35.0 key order), the runtime
-  report's `Protection configurations` column, and the transfer walks over every direction. Rows: D332, D333 new; D117
+  report's `Protection configurations` column, and the transfer walks over every direction; the 0.2.4 fields keep
+  omission, explicit `false`, string DLP tenant ids and unknown directions, and an unexpected value in an answer is
+  printed and backed up as sent (D334). Rows: D332, D333, D334 new; D117
   retired; D26, D50, D93, D94, D96, D98–D103, D106, D115, D116 reworded. Tests: `tests/parity_runtime_directional.rs`
-  (every scenario of 7.3.0's directional integration spec on both CLIs, on its fixture, plus `d332_`/`d333_`), the
-  directional cases in `parity_runtime_writes`, `parity_runtime_topics`, `parity_runtime_report` and
-  `parity_runtime_transfer`, and the `src/profile_policy.rs` and `src/policy.rs` unit tests. Not yet done: the bounded
+  (every scenario of 7.3.0's directional integration spec on both CLIs, on its fixture, the 0.2.4 field cases, plus
+  `d332_`–`d334_`), the `sdk_0_2_4` module of `tests/runtime_writes.rs`, the directional cases in
+  `parity_runtime_writes`, `parity_runtime_topics`, `parity_runtime_report`, `parity_runtime_transfer` and
+  `runtime_transfer`, and the `src/profile_policy.rs`, `src/policy.rs` and `src/views.rs` unit tests. Not yet done: the bounded
   live run against `redtail-prod` per direction (B7) and the adversarial review; directional profiles stay
   experimental until then.

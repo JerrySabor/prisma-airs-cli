@@ -278,7 +278,7 @@ fn d65_header_allow_list() {
     let headers = records[0]["request"]["headers"].as_object().unwrap();
     assert_eq!(headers["x-payload-hash"], "***");
     assert_eq!(headers["x-pan-token"], "***");
-    assert_eq!(headers["user-agent"], "PAN-AIRS/0.2.3-rust-sdk");
+    assert_eq!(headers["user-agent"], "PAN-AIRS/0.2.4-rust-sdk");
 }
 
 /// D66: Rust records add `operation`, use lowercase sorted header names and the

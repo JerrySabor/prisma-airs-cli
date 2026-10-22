@@ -29,12 +29,16 @@ file records the changes to the repository itself.
 
 - **Reference.** The parity reference moves to tag `v7.3.0` (`7a54e46eee4f`, TS SDK
   0.35.0), the final TypeScript release (docs/TESTING.md §3.4).
-- **SDK.** `scm-sdk` 0.2.4, the TypeScript SDK 0.35.0 overlay. **Temporary:** until 0.2.4
-  is on crates.io, `Cargo.toml` takes the exact Forgejo commit
-  `4825616ccf4c29272aff9a1ec3dcffb8b2e91535` (`cdot/scm-sdk-rs`, branch
-  `feat/typescript-035-parity`) as a git dependency; replace it with `=0.2.4` when
-  published (DESIGN §15.25). `Cargo.lock` also moves `rustls-webpki` to 0.103.16 and
-  `webpki-root-certs` to 1.0.10 (RUSTSEC-2026-0382, -0383).
+- **SDK.** `scm-sdk = "=0.2.4"` from crates.io, the TypeScript SDK 0.35.0 overlay (DESIGN
+  §15.25). The port was first built on its exact Forgejo commit `4825616` as a temporary
+  git dependency; the published crate's sources are that commit's, with the version
+  bumped. Requests carry `PAN-AIRS/0.2.4-rust-sdk`. `Cargo.lock` also moves
+  `rustls-webpki` to 0.103.16 and `webpki-root-certs` to 1.0.10 (RUSTSEC-2026-0382,
+  -0383); `cargo audit` and `cargo deny check advisories sources` pass.
+- **The 0.2.4 fields.** A profile answer whose new fields hold an unexpected value (an
+  explicit `null`, a wrong type) is printed and backed up as sent (D334); every new
+  request field is checked before the tenant; omitted settings stay omitted and an explicit
+  `false` stays `false`.
 - **Directional security profiles** (experimental, DESIGN §13.17): `--direction` and
   `--ai-profile-index` on `runtime profiles create|update` and `runtime topics
   apply|revert`; `--[no-]enable-full-conversation-inspection`, `--no-mask-data-inline`,
@@ -48,5 +52,5 @@ file records the changes to the repository itself.
   tenant's `defaultOutput`; `--active` only when given; the `malicious-code` name on the
   update merge path; `--dlp-profiles` and `--[no-]mask-data-inline` without `--dlp-action`
   on update; `revert` refuses a topic the profile does not reference.
-- **§12 rows.** New: D332, D333. Retired: D117. Reworded: D26, D50, D93, D94, D96,
+- **§12 rows.** New: D332, D333, D334. Retired: D117. Reworded: D26, D50, D93, D94, D96,
   D98–D103, D106, D115, D116.

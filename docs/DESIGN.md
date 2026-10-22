@@ -584,7 +584,7 @@ transport and has no record. Records appear in completion order.
 this order, TS names where TS has the field:
 
 ```json
-{"timestamp":"2026-10-17T11:03:44.500Z","durationMs":6,"operation":"airs.management.profiles.list","request":{"method":"GET","url":"https://api.apps.paloaltonetworks.com/aisec/v1/mgmt/profiles/tsg/100","headers":{"authorization":"***","service-name":"api","user-agent":"PAN-AIRS/0.2.3-rust-sdk"}},"response":{"status":200,"statusText":"OK","headers":{"content-length":"722","content-type":"application/json","date":"Sat, 17 Oct 2026 11:03:44 GMT"}}}
+{"timestamp":"2026-10-17T11:03:44.500Z","durationMs":6,"operation":"airs.management.profiles.list","request":{"method":"GET","url":"https://api.apps.paloaltonetworks.com/aisec/v1/mgmt/profiles/tsg/100","headers":{"authorization":"***","service-name":"api","user-agent":"PAN-AIRS/0.2.4-rust-sdk"}},"response":{"status":200,"statusText":"OK","headers":{"content-length":"722","content-type":"application/json","date":"Sat, 17 Oct 2026 11:03:44 GMT"}}}
 ```
 
 - `timestamp`: UTC at entry to `send`, `YYYY-MM-DDTHH:MM:SS.mmmZ` (formatted in-crate
@@ -8448,63 +8448,106 @@ before, G25 stays closed, G71 is unchanged (AgentGuard is byte-identical).
 
 8.0 adopts scm-sdk 0.2.4, the additive patch release that adds the final TypeScript SDK,
 0.35.0 (`780c985`), as versioned schema roots (`typescript:0.35.0:`) beside the unchanged
-0.34.0 baseline (the SDK's `docs/typescript-035-parity-plan.md`, `docs/DIRECTIONAL_PROFILES.md`
-and CHANGELOG). **Temporary pin.** 0.2.4 is not on crates.io yet (checked 2026-10-22: the
-newest version there is 0.2.3), so the dependency is the exact Forgejo commit of the
-overlay, `4825616ccf4c29272aff9a1ec3dcffb8b2e91535` on `cdot/scm-sdk-rs` branch
-`feat/typescript-035-parity` ("feat: close TypeScript 0.35 directional profile parity
-gaps"; its crate version is still 0.2.3):
-`scm = { package = "scm-sdk", git = "ssh://git@git-ssh.cdot.io/cdot/scm-sdk-rs.git", rev = "4825616ccf4c29272aff9a1ec3dcffb8b2e91535", default-features = false, features = [<unchanged>] }`.
-A git dependency cannot be published, so the line also blocks `cargo publish` until it is
-replaced; CI runners without SSH access to Forgejo cannot fetch it either.
+0.34.0 baseline (the SDK's `docs/DIRECTIONAL_PROFILES.md`, its offline example
+`examples/directional_profiles.rs` and its CHANGELOG).
 
-**When 0.2.4 is published** (and tagged `v0.2.4`): the pin becomes `version = "=0.2.4"`
-with the same features; `Cargo.lock`'s `scm-sdk` entry gets the registry source and its
-checksum (`cargo update -p scm-sdk --precise 0.2.4`); the SDK user agent becomes
+**The pin** (adopted 2026-10-22; 0.2.4 was published on crates.io at 2026-10-22T17:49Z
+from the annotated tag `v0.2.4`, commit `6f18529a47cc273feca1000af6e4fc0d96da757e`):
+`scm = { package = "scm-sdk", version = "=0.2.4", default-features = false, features = ["reqwest-transport", "scan", "management", "red-team", "dlp", "model-security", "gateway", "agentguard"] }`.
+The features are unchanged; `management` (the profile clients) was already enabled.
+`cargo update -p scm-sdk --precise 0.2.4` changed only the `scm-sdk` entry of
+`Cargo.lock`: version 0.2.4, the crates.io source and checksum
+`533294fe977e26e251e01dd2de64a896aa22ce45e97ac6264a0df6af879edd55`. Requests carry
 `PAN-AIRS/0.2.4-rust-sdk` (§2.9, README, `tests/debug.rs`, `tests/parity_debug.rs`,
-`tests/gateway_inventory.rs`; it is `PAN-AIRS/0.2.3-rust-sdk` on the git commit, whose
-crate version is 0.2.3); the published crate is diffed against `4825616` and this section
-records any difference; the full definition of done runs again.
+`tests/gateway_inventory.rs`). Before publication the tree built the exact Forgejo commit
+`4825616ccf4c29272aff9a1ec3dcffb8b2e91535` of the overlay (branch
+`feat/typescript-035-parity`, crate version 0.2.3, user agent `PAN-AIRS/0.2.3-rust-sdk`) as
+a temporary git dependency; that line is gone, so nothing blocks `cargo publish` on it.
 
-**What the overlay changes for this CLI** (measured on the 8.0 tree, 2026-10-22):
+**The published crate against `4825616`** (checked 2026-10-22). The downloaded
+`scm-sdk-0.2.4.crate` (the checksum above) names `6f18529` in `.cargo_vcs_info.json`; its
+`src/**`, `examples/**`, `LICENSE` and `NOTICE` are byte-identical to `crates/scm-sdk` at
+`v0.2.4`, and its `Cargo.toml.orig` is the tag's manifest. Between `4825616` and `v0.2.4`,
+`crates/scm-sdk` changes only the manifest's `version` (0.2.3 → 0.2.4); the seven commits
+between them change release documentation, receipts and tests outside the crate. So the
+swap changes no behaviour of this CLI except the user agent; the full definition of done
+ran again on it.
+
+**What 0.2.4 changes for this CLI** (measured on the 8.0 tree):
 1. **The diff.** Against tag `v0.2.3` (`14a6754`) the crate changes only
    `src/airs/management/profiles.rs` (create and update validate their body with
    `typescript:0.35.0:CreateSecurityProfileRequestSchema` before authentication),
    `src/models/{generated,management}.rs` (the two new types and five fields),
    `src/validation/{schema_graph,semantics}.json` (the versioned roots),
    `src/fixtures/model-regressions.json`, its tests and the new offline example. The scan,
-   red team, DLP, model-security, gateway and AgentGuard modules, the transport, the engine
-   and the authentication are unchanged.
+   red team, DLP, model-security, gateway and AgentGuard modules, the streaming and SSE
+   decoder, the transport, the engine and the authentication are unchanged.
 2. **Types.** `ContentTypeConfiguration` (`data-protection`, `app-protection`,
    `model-protection`, `agent-protection`) and `ContentTypeConfigurations` (`prompt`,
    `response`, `tool-call`, `tool-response`, unknown directions kept); `AiSecurityProfile`
    gains `content_type_mode` and `content_type_configurations`, `ModelConfiguration`
    `enable_full_conversation_inspection`, `SecurityProfile` and
    `CreateSecurityProfileRequest` `dlp_tenant_id`, all `Optional<T>`. The CLI builds no
-   profile model with a struct literal, so the tree compiled unchanged and clippy was clean
-   before any 8.0 change (measured).
-3. **Validation.** Existing model `parse` methods keep their 0.34.0 binding; the operation
-   paths validate with the 0.35.0 root, which refuses an explicit `null` or a wrong type
-   for the new fields and known directions. The CLI validates every profile body with the
-   same root itself (`policy::request_body`, `validation::parse`), before the tenant where
-   it can, so the SDK's own refusal is never what a user sees (§13.17). Responses keep
-   0.34.0's tolerant binding: unknown fields, directions and modes and invalid values of the
-   new fields survive in extensions.
-4. **Key order.** The new typed fields serialise after the 0.34.0 fields (an AI entry's
-   `model-configuration` before `content-type-mode`; `enable-full-conversation-inspection`
-   last), and `ModelConfiguration` keeps its 0.34.0 order, where TypeScript SDK 0.35.0
-   prints the protections first. The profile views reorder those two objects (§13.17).
-5. **Dependencies.** The overlay adds no dependency and changes no feature or MSRV (1.89).
-   `Cargo.lock` changes the `scm-sdk` entry (git source) and, following the SDK's
-   RUSTSEC-2026-0382/0383 advisory for downstream lockfiles, `rustls-webpki` 0.103.15 →
-   0.103.16 and `webpki-root-certs` 1.0.5 → 1.0.10; nothing else.
+   profile model with a struct literal, so the tree compiled unchanged. How the CLI carries
+   them is §13.17 ("The scm-sdk 0.2.4 fields").
+3. **Validation.** Existing model `parse` and `build_validated` methods keep their 0.34.0
+   binding; the operation paths validate with the 0.35.0 root, which refuses an explicit
+   `null` or a wrong type for the new fields and known directions, also through raw
+   extensions. The CLI validates every profile body with the same root itself
+   (`policy::request_body`, `validation::parse`), before the tenant where it can, so the
+   SDK's own refusal is never what a user sees (§13.17). Responses keep 0.34.0's tolerant
+   binding in both response modes: unknown fields, directions and modes and invalid values
+   of the new fields survive in extensions (D334).
+4. **Response defaults (G10).** No schema reachable from a profile carries a default except
+   the list's `ai_profiles: []` (also through the versioned alias `s_ts035_s009653`), which
+   prints nothing; the backup walk reads every page with `without_response_defaults()`
+   (§18.15), so a backed-up record never gains a key. G25 is unchanged: response ids,
+   timestamps, unknown enum strings and object keys stay accepted.
+5. **Dependencies.** 0.2.4 adds no dependency and changes no feature or MSRV (1.89). Before
+   the swap, following the SDK's RUSTSEC-2026-0382/0383 advisory for downstream lockfiles,
+   `Cargo.lock` moved `rustls-webpki` 0.103.15 → 0.103.16 and `webpki-root-certs` 1.0.5 →
+   1.0.10, the versions of the SDK's qualified lockfile. The audit of the resolved graph
+   (2026-10-22, RustSec database `640bf5a9`): `cargo audit` reports no vulnerability on
+   the 236 locked packages (the 1.0 lockfile, with 0.103.15 and 1.0.5, reports exactly
+   those two advisories), and `cargo deny check advisories sources` passes (crates.io the
+   only source; no git dependency is left). This repository configures no `deny.toml` or
+   audit job; the policy it keeps is exact pins for new direct dependencies and no
+   `serde_json/preserve_order`. Against the SDK's own qualified `Cargo.lock`, the CLI
+   resolves every shared package at the same version except `schannel` (Windows only,
+   0.1.30 here, 0.1.29 there).
 6. **Status.** The SDK marks directional live acceptance unverified; so does this CLI
-   (§13.17, MILESTONES 8.0).
+   (§13.17, MILESTONES 8.0). Offline loopback tests do not show that a tenant applies
+   these settings.
 
-**SDK gaps.** None blocks the port. Observed and worked around in the CLI, not changed in
-the SDK: the model `parse` methods stay on the 0.34.0 schema (the CLI calls
-`validation::parse` with the versioned root), and the `ModelConfiguration` field order is
-0.34.0's (the views reorder for printing).
+**Workarounds, decided on 0.2.4** (both kept; neither is an SDK change):
+- **The 0.35.0 request root.** 0.2.4's documentation (`DIRECTIONAL_PROFILES.md`,
+  "Construction and current request validation") keeps the model `parse` and
+  `build_validated` methods on their historical binding, and directs standalone callers to
+  `validation::parse` with `typescript:0.35.0:<SchemaName>`. The CLI therefore keeps
+  validating with the versioned root: `CreateSecurityProfileRequest::parse` alone accepts a
+  `null` `dlp_tenant_id` that the create call then refuses
+  (`src/policy.rs::tests::request_bodies_keep_the_directional_fields_as_given`). The new
+  named schemas (`ContentTypeConfigurationSchema`, `ContentTypeConfigurationsSchema`) are
+  reached through the request root and need no separate call.
+- **The printed key order.** 0.2.4 serialises an AI entry and `model-configuration` in
+  0.34.0 field order (the new fields last), where TypeScript SDK 0.35.0 prints
+  `content-type-mode` and `content-type-configurations` before `model-configuration` and
+  the protections first. The views keep reordering those two objects; the reorder moves
+  keys only and drops none (`src/views.rs::tests::the_printed_policy_reorders_keys_and_drops_nothing`).
+
+**Streaming and SSE.** The SDK's SSE decoder (`scm::streaming::sse`) and the typed
+`ContractStream` date from 0.2.0 and are unchanged by 0.2.4. The only streamed responses
+this CLI reads are `gateway inference chat|responses --stream` (§19.14), which already
+consume `create_chat_completion_stream` and `create_response_stream`; the CLI keeps only
+rendering, secret withholding and interruption. No command parses SSE or another streamed
+format by hand (`DirectTransport` hands the SDK raw body chunks; `model-security install
+--fetch-uv` reads a download, not an event stream), so nothing moved.
+
+**Cumulative migrations.** The CLI adopted 0.2.3 in 1.0 (§15.24: the Vertex AI, N8N and
+realtime values, the client-session config, the basic-auth and audio fields, with their
+unknown-value fallbacks; `profiling_status` is reconciled without a flag, choice 4);
+`targets error-logs --offset` and `--search` stay usage errors before the tenant (D300).
+0.2.4 adds nothing to reconcile there.
 
 ## 16. M6b DLP (0.7)
 
@@ -12317,7 +12360,7 @@ command opens the realtime socket). The walk of every response and request schem
   standalone routing-configuration schemas no command decodes), and request validation keeps every format check.
   So no gateway read or write answer changes and no test expectation moves; D306 needs no gateway extension.
 - The user agent is `PAN-AIRS/0.2.2-rust-sdk` on every gateway request in 0.10 and 0.11, and
-  `PAN-AIRS/0.2.3-rust-sdk` from 1.0 (§15.24 point 8; the §2.9 header list; `tests/gateway_inventory.rs` expects it).
+  `PAN-AIRS/0.2.3-rust-sdk` in 1.0 (§15.24 point 8) and `PAN-AIRS/0.2.4-rust-sdk` from 8.0 (§15.25; the §2.9 header list; `tests/gateway_inventory.rs` expects it).
 - G36–G49 are unchanged by 0.2.2 (each re-checked below); G49 is settled on 0.2.2.
 - 0.2.1 adds the experimental Portkey access-policy API (`AccessPoliciesClient`: create, list, get, update and
   delete on an explicitly configured, key-authenticated Portkey control plane, separate from SCM OAuth). The

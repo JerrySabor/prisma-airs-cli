@@ -31,9 +31,8 @@ every channel (crates.io, npm, Homebrew, the Forgejo release and the docs site):
 the `airs-cli` name and the npm channel described below, and ports the TypeScript CLI
 7.3.0 changes (directional runtime security profiles, experimental, see
 [Directional profiles](#directional-profiles-80-experimental)) on `scm-sdk` 0.2.4, the
-TypeScript SDK 0.35.0 overlay. Until 0.2.4 is on crates.io the tree builds the SDK from
-its exact Forgejo commit (a temporary git dependency, DESIGN §15.25). There is no 1.0.1 or
-1.1.0 release.
+TypeScript SDK 0.35.0 overlay (`=0.2.4` from crates.io, DESIGN §15.25). There is no 1.0.1
+or 1.1.0 release.
 
 | Milestone | Commands |
 |---|---|
@@ -126,9 +125,8 @@ ln -sf airs ~/.local/bin/airs-cli-rs
 
 `~/.local/bin` must be on `PATH`, and ahead of any other `airs` (see below).
 
-**From source:** the SDK, `scm-sdk`, comes from crates.io (`=0.2.4`) once 0.2.4 is
-published; until then the tree builds it from its exact Forgejo commit, so a source build
-of this branch needs SSH access to `git-ssh.cdot.io` as well as the crates.io index.
+**From source:** every dependency, the SDK `scm-sdk` (`=0.2.4`) included, comes from
+crates.io.
 
 ```sh
 cargo build --release
@@ -1125,7 +1123,7 @@ kept. stderr names the file (`  Debug: API log → <path>`, hidden by `--quiet`)
 is one attempt:
 
 ```json
-{"timestamp":"2026-10-17T11:03:44.500Z","durationMs":6,"operation":"airs.management.profiles.list","request":{"method":"GET","url":"https://api.apps.paloaltonetworks.com/aisec/v1/mgmt/profiles/tsg/100","headers":{"authorization":"***","service-name":"api","user-agent":"PAN-AIRS/0.2.3-rust-sdk"}},"response":{"status":200,"statusText":"OK","headers":{"content-type":"application/json"}}}
+{"timestamp":"2026-10-17T11:03:44.500Z","durationMs":6,"operation":"airs.management.profiles.list","request":{"method":"GET","url":"https://api.apps.paloaltonetworks.com/aisec/v1/mgmt/profiles/tsg/100","headers":{"authorization":"***","service-name":"api","user-agent":"PAN-AIRS/0.2.4-rust-sdk"}},"response":{"status":200,"statusText":"OK","headers":{"content-type":"application/json"}}}
 ```
 
 Header values outside a short allow-list (`content-type`, `user-agent`, `date`,

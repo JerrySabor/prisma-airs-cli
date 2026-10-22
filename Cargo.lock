@@ -1353,8 +1353,9 @@ dependencies = [
 
 [[package]]
 name = "scm-sdk"
-version = "0.2.3"
-source = "git+ssh://git@git-ssh.cdot.io/cdot/scm-sdk-rs.git?rev=4825616ccf4c29272aff9a1ec3dcffb8b2e91535#4825616ccf4c29272aff9a1ec3dcffb8b2e91535"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "533294fe977e26e251e01dd2de64a896aa22ce45e97ac6264a0df6af879edd55"
 dependencies = [
  "base64 0.22.1",
  "bytes",
