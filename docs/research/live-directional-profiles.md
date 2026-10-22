@@ -151,15 +151,22 @@ session as the request IDs listed above (for example `b26a63b4-3683-4d55-92fb-ed
 `04916dac-85d0-4a6b-a07e-e8dd02f49bc6` and `3ed44707-ade5-4071-981e-617d7008b825`), which
 locate the run in the service's logs.
 
-**The distinguishing test (not run).** Copy a DLP-bound profile under a run-prefixed name with
-`profiles create --config`, the file holding its policy and `"dlp_tenant_id": "<TSG>"` (as
-step 4 sent it; a backup and restore would not send the value). Run a DLP-triggering scan
-against the copy: it must detect, or the copy is not bound and the test shows nothing.
-Update the copy through the CLI with a change unrelated to DLP (for example `profiles update
-<copy> --max-inline-latency <n>`, which omits `dlp_tenant_id`). Run the same scan again. If DLP still detects, the binding is kept and the `"none"` only
-echoes the request; if it no longer does, the omitted key cleared it. Then delete every
-revision of the copy. This needs a DLP-bound profile and a scan budget, and it has not been
-run.
+**The distinguishing test (not run).** Make two run-prefixed copies of a DLP-bound profile
+with `profiles create --config`, both holding its policy: the bound copy with
+`"dlp_tenant_id"` set to the tenant's real DLP tenant ID (the value the DLP inventory reports,
+`src/dlp/backup.rs`, not the TSG ID that step 4 sent, which the service echoed without a
+check), and a control copy without the key. Run the same DLP-triggering scan against both.
+
+- If the bound copy does not detect, the copy is not bound and the test shows nothing.
+- If the control copy detects as well, the field does not affect enforcement and the question
+  is closed.
+- Otherwise update the bound copy through the CLI with a change unrelated to DLP (for example
+  `profiles update <copy> --max-inline-latency <n>`, which omits `dlp_tenant_id`) and run the
+  scan again. If DLP still detects, the binding is kept and the `"none"` only echoes the
+  request; if it no longer does, the omitted key cleared it.
+
+Then delete every revision of both copies. This needs a DLP-bound profile and a scan budget,
+and it has not been run.
 
 ## Departures from the live test rules (MILESTONES)
 

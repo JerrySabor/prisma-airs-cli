@@ -96,18 +96,18 @@ pub fn plan_create(
     };
     let selector = Selector::parse(args.direction.as_deref(), None)?;
     let flags = Flags::read(&args.policy);
-    if selector.direction.is_some() {
-        // D336: the service refuses a directional policy whose four directions are all
-        // empty, so a create whose flags fill no direction is refused before OAuth.
-        if !flags.fills_a_direction() {
-            return Err(CliError::usage(DIRECTIONAL_WITHOUT_PROTECTION));
-        }
-    } else if !flags.any_protection() {
+    if selector.direction.is_none() && !flags.any_protection() {
         return Err(CliError::usage(
             "Specify at least one policy flag (for example --prompt-injection block) or --config <path>",
         ));
     }
     flags.check()?;
+    // D336: the service refuses a directional policy whose four directions are all
+    // empty, so a create whose flags fill no direction is refused before OAuth. It runs
+    // after the flag check, so an invalid shared value is reported as TypeScript does.
+    if selector.direction.is_some() && !flags.fills_a_direction() {
+        return Err(CliError::usage(DIRECTIONAL_WITHOUT_PROTECTION));
+    }
     if flags.dlp_without_action() {
         return Err(CliError::usage(
             "--dlp-profiles and --[no-]mask-data-inline require --dlp-action when creating a profile",

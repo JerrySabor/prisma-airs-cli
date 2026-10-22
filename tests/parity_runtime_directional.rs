@@ -402,7 +402,7 @@ mod parity {
                 assert!(side.requests.is_empty(), "before OAuth: {args:?}");
             }
             if same_text {
-                assert_eq!(usage_line(&rust.run.stderr), usage_line(&ts.run.stderr));
+                assert_eq!(rust.run.stderr, ts.run.stderr);
             }
         }
     }
@@ -420,7 +420,7 @@ mod parity {
             usage_line(&rust.run.stderr).as_deref(),
             Some("Directional protection edits require --direction")
         );
-        assert_eq!(usage_line(&rust.run.stderr), usage_line(&ts.run.stderr));
+        assert_eq!(rust.run.stderr, ts.run.stderr);
         for side in [&rust, &ts] {
             assert!(side.count(Route::Profiles) >= 1, "the profile was read");
         }
@@ -445,7 +445,7 @@ mod parity {
             return;
         };
         assert_refused_without_writes(&rust, &ts);
-        assert_eq!(usage_line(&rust.run.stderr), usage_line(&ts.run.stderr));
+        assert_eq!(rust.run.stderr, ts.run.stderr);
         // The fixture names the same profile, so the D103 name check passes.
         let args = profiles(&[
             "update",
@@ -563,7 +563,7 @@ mod parity {
             return;
         };
         assert_refused_without_writes(&rust, &ts);
-        assert_eq!(usage_line(&rust.run.stderr), usage_line(&ts.run.stderr));
+        assert_eq!(rust.run.stderr, ts.run.stderr);
         let mut both_directions = directional();
         for direction in ["prompt", "response"] {
             both_directions["policy"]["ai-security-profiles"][0]["content-type-configurations"]
@@ -595,7 +595,7 @@ mod parity {
                 "Topic is referenced in another direction or AI entry; detach those references before reverting and deleting"
             )
         );
-        assert_eq!(usage_line(&rust.run.stderr), usage_line(&ts.run.stderr));
+        assert_eq!(rust.run.stderr, ts.run.stderr);
     }
 
     /// TS spec: "refuses %s against an absent direction or legacy layout before any write".
@@ -627,7 +627,7 @@ mod parity {
                     return;
                 };
                 assert_refused_without_writes(&rust, &ts);
-                assert_eq!(usage_line(&rust.run.stderr), usage_line(&ts.run.stderr));
+                assert_eq!(rust.run.stderr, ts.run.stderr);
             }
         }
     }
@@ -659,7 +659,7 @@ mod parity {
             return;
         };
         assert_refused_without_writes(&rust, &ts);
-        assert_eq!(usage_line(&rust.run.stderr), usage_line(&ts.run.stderr));
+        assert_eq!(rust.run.stderr, ts.run.stderr);
     }
 
     /// A directional flag create with no policy flag at all (TS `buildProfileRequest` with
@@ -708,7 +708,7 @@ mod parity {
             return;
         };
         assert_refused_without_writes(&rust, &ts);
-        assert_eq!(usage_line(&rust.run.stderr), usage_line(&ts.run.stderr));
+        assert_eq!(rust.run.stderr, ts.run.stderr);
         for extra in [
             &["--direction", "response", "--toxic-content", "alert"][..],
             &["--max-inline-latency", "11"],
@@ -1140,6 +1140,34 @@ mod divergence {
                 "{direction}: TypeScript sends the shared settings and an empty direction"
             );
         }
+        // An invalid shared value is reported as such on both CLIs: the flag check runs
+        // before the D336 gate. The texts differ by D102 (TypeScript prints its request
+        // schema's issue for the field).
+        let args = profiles(&[
+            "create",
+            "--name",
+            "Shared",
+            "--direction",
+            "prompt",
+            "--max-inline-latency",
+            "1.5",
+        ]);
+        let Some((rust, ts)) = both("d336_invalid", &directional(), &refs(&args)) else {
+            return;
+        };
+        for side in [&rust, &ts] {
+            assert_eq!(side.run.code, 2, "{:?}", side.run);
+            assert!(side.requests.is_empty(), "before OAuth: {:?}", side.run);
+        }
+        assert_eq!(
+            usage_line(&rust.run.stderr).as_deref(),
+            Some("--max-inline-latency must be a non-negative integer")
+        );
+        assert!(
+            ts.run.stderr.contains("\"max-inline-latency\""),
+            "{:?}",
+            ts.run
+        );
     }
 }
 
