@@ -209,6 +209,7 @@ fn tables(report: &Report) -> Vec<Table> {
                 "Active",
                 "Timeout action",
                 "Storage masking",
+                "Protection configurations",
                 "Last modified (UTC)",
             ],
             rows: report
@@ -229,6 +230,11 @@ fn tables(report: &Report) -> Vec<Table> {
                             profile.timeout_actions.join(", ")
                         },
                         profile.storage_masking.to_owned(),
+                        if profile.protection_configurations.is_empty() {
+                            unknown()
+                        } else {
+                            profile.protection_configurations.join("; ")
+                        },
                         profile.modified.clone().unwrap_or_else(unknown),
                     ]
                 })

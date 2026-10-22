@@ -680,3 +680,35 @@ fn null_policy_fields_and_inconsistent_rates() {
     report.sources.clear();
     assert!(runtime_html::render(&report).contains("Source: unavailable"));
 }
+
+/// TS 7.3.0 `protectionConfigurations` (§13.17): one row per active block, the sections
+/// that hold something, the shared settings left out.
+#[test]
+fn protection_configurations_name_every_active_block() {
+    let mut directional = airs_test_harness::fixtures::runtime::directional_profile();
+    directional["policy"]["ai-security-profiles"][0]["content-type-configurations"]["tool-response"] =
+        json!({"x-future": true, "model-protection": []});
+    let rows = protection_configurations(ordered(&directional).get("policy"));
+    assert_eq!(
+        rows,
+        [
+            "AI[0] default / prompt: model-protection, app-protection, data-protection",
+            "AI[0] default / response: model-protection, app-protection, data-protection",
+            "AI[0] default / tool-call: model-protection, app-protection, data-protection",
+            "AI[0] default / tool-response: No modeled protection sections returned",
+        ]
+    );
+    let legacy = json!({"policy": {"ai-security-profiles": [
+        {"model-type": "default", "model-configuration": {"agent-protection": [{"name": "a"}], "latency": {}}},
+        {"model-configuration": {"mask-data-in-storage": true}},
+        "not an object"
+    ]}});
+    assert_eq!(
+        protection_configurations(ordered(&legacy).get("policy")),
+        [
+            "AI[0] default / legacy: agent-protection",
+            "AI[1] Unknown / legacy: No modeled protection sections returned",
+        ]
+    );
+    assert!(protection_configurations(None).is_empty());
+}

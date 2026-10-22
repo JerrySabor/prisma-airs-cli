@@ -85,6 +85,8 @@ pub struct Profile {
     pub modified: Option<String>,
     pub timeout_actions: Vec<String>,
     pub storage_masking: &'static str,
+    /// One row per active protection block (TS 7.3.0 `protectionConfigurations`, §13.17).
+    pub protection_configurations: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -177,6 +179,69 @@ pub fn label(value: Option<&OValue>) -> String {
 /// [`label`] of a string.
 pub fn label_text(text: &str) -> String {
     super::label_text_with(text, RUNTIME_LABEL)
+}
+
+/// The sections a protection block row names, in TS 7.3.0's order.
+const PROTECTION_SECTIONS: [&str; 4] = [
+    "model-protection",
+    "agent-protection",
+    "app-protection",
+    "data-protection",
+];
+
+/// One protection row: `AI[<i>] <model-type> / <direction|legacy>: <sections>`, the
+/// sections that hold a non-empty object or array.
+fn protection_row(index: usize, model_type: &str, place: &str, block: &OValue) -> String {
+    let sections: Vec<&str> = PROTECTION_SECTIONS
+        .into_iter()
+        .filter(|key| match block.get(key) {
+            Some(OValue::Object(fields)) => !fields.is_empty(),
+            Some(OValue::Array(items)) => !items.is_empty(),
+            _ => false,
+        })
+        .collect();
+    let sections = if sections.is_empty() {
+        "No modeled protection sections returned".to_owned()
+    } else {
+        sections.join(", ")
+    };
+    format!("AI[{index}] {model_type} / {place}: {sections}")
+}
+
+/// TS 7.3.0 `protectionConfigurations`: every active protection block of a policy (a
+/// legacy entry's `model-configuration`, a directional entry's directions; §13.17), in
+/// the answer's order. The page is read as the SDK serialises it, so known directions
+/// come in `prompt`, `response`, `tool-call`, `tool-response` order.
+pub fn protection_configurations(policy: Option<&OValue>) -> Vec<String> {
+    let mut rows = Vec::new();
+    let entries = policy
+        .and_then(|policy| policy.get("ai-security-profiles"))
+        .and_then(OValue::as_array)
+        .unwrap_or_default();
+    for (index, entry) in entries.iter().enumerate() {
+        if entry.as_object().is_none() {
+            continue;
+        }
+        let directions = entry.get("content-type-configurations");
+        let directional = entry.get("content-type-mode").and_then(OValue::as_str)
+            == Some(crate::profile_policy::PER_CONTENT_TYPE)
+            || directions.is_some();
+        let model_type = label(entry.get("model-type"));
+        if !directional && let Some(block @ OValue::Object(_)) = entry.get("model-configuration") {
+            rows.push(protection_row(index, &model_type, "legacy", block));
+        }
+        for (direction, block) in directions.and_then(OValue::as_object).unwrap_or_default() {
+            if matches!(block, OValue::Object(_)) {
+                rows.push(protection_row(
+                    index,
+                    &model_type,
+                    &label_text(direction),
+                    block,
+                ));
+            }
+        }
+    }
+    rows
 }
 
 /// TS `count`: a safe integer ≥ 0, else `None`.
@@ -854,6 +919,7 @@ pub(crate) async fn collect_report(
                 modified,
                 timeout_actions,
                 storage_masking,
+                protection_configurations: protection_configurations(profile.get("policy")),
             }
         })
         .collect();

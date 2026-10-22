@@ -455,61 +455,66 @@ pub fn dlp_references(policy: Option<&Value>) -> Result<Vec<DlpRef>, Refusal> {
             });
         }
     }
-    if let Some(Value::Array(entries)) = policy.get("ai-security-profiles") {
-        for (index, entry) in entries.iter().enumerate() {
-            let model = entry.get("model-configuration");
-            if !is_object(Some(entry)) || !is_object(model) {
-                continue;
-            }
-            let protection = model.and_then(|model| model.get("data-protection"));
-            let detection = protection.and_then(|protection| protection.get("data-leak-detection"));
-            if !is_object(protection) || !is_object(detection) {
-                continue;
-            }
-            let Some(Value::Array(members)) =
-                detection.and_then(|detection| detection.get("member"))
+    // TS 7.3.0: every protection block, a directional entry's directions and its retained
+    // `model-configuration` included (§13.17).
+    let whole = Value::Object(policy.clone());
+    for location in crate::profile_policy::locations(Some(&whole)) {
+        let protection = location.configuration.get("data-protection");
+        let detection = protection.and_then(|protection| protection.get("data-leak-detection"));
+        if !is_object(protection) || !is_object(detection) {
+            continue;
+        }
+        let Some(Value::Array(members)) = detection.and_then(|detection| detection.get("member"))
+        else {
+            continue;
+        };
+        for (at, member) in members.iter().enumerate() {
+            let Some(name) = member
+                .as_object()
+                .and_then(|map| map.get("text"))
+                .and_then(Value::as_str)
             else {
-                continue;
+                return Err(Refusal::Withheld("Invalid DLP member".to_owned()));
             };
-            for (at, member) in members.iter().enumerate() {
-                let Some(name) = member
-                    .as_object()
-                    .and_then(|map| map.get("text"))
-                    .and_then(Value::as_str)
-                else {
-                    return Err(Refusal::Withheld("Invalid DLP member".to_owned()));
-                };
-                let id = member.get("id");
-                let version = member.get("version");
-                let id_empty = match id {
-                    None => true,
-                    Some(Value::String(id)) => id.is_empty(),
-                    Some(_) => false,
-                };
-                let builtin = name.to_lowercase() == "sensitive content"
-                    && id_empty
-                    && (version.is_none() || version.and_then(Value::as_str) == Some("2"))
-                    && !refs
-                        .iter()
-                        .any(|r| r.kind == DlpKind::Embedded && r.name == name);
-                if builtin {
-                    continue;
-                }
-                refs.push(DlpRef {
-                    path: vec![
-                        PathStep::Key("ai-security-profiles".into()),
-                        PathStep::Index(index),
-                        PathStep::Key("model-configuration".into()),
-                        PathStep::Key("data-protection".into()),
-                        PathStep::Key("data-leak-detection".into()),
-                        PathStep::Key("member".into()),
-                        PathStep::Index(at),
-                    ],
-                    name: name.to_owned(),
-                    kind: DlpKind::Member,
-                    has_version: version.is_some(),
-                });
+            let id = member.get("id");
+            let version = member.get("version");
+            let id_empty = match id {
+                None => true,
+                Some(Value::String(id)) => id.is_empty(),
+                Some(_) => false,
+            };
+            let builtin = name.to_lowercase() == "sensitive content"
+                && id_empty
+                && (version.is_none() || version.and_then(Value::as_str) == Some("2"))
+                && !refs
+                    .iter()
+                    .any(|r| r.kind == DlpKind::Embedded && r.name == name);
+            if builtin {
+                continue;
             }
+            let mut path = vec![
+                PathStep::Key("ai-security-profiles".into()),
+                PathStep::Index(location.place.index),
+            ];
+            match &location.place.direction {
+                None => path.push(PathStep::Key("model-configuration".into())),
+                Some(direction) => {
+                    path.push(PathStep::Key("content-type-configurations".into()));
+                    path.push(PathStep::Key(direction.clone()));
+                }
+            }
+            path.extend([
+                PathStep::Key("data-protection".into()),
+                PathStep::Key("data-leak-detection".into()),
+                PathStep::Key("member".into()),
+                PathStep::Index(at),
+            ]);
+            refs.push(DlpRef {
+                path,
+                name: name.to_owned(),
+                kind: DlpKind::Member,
+                has_version: version.is_some(),
+            });
         }
     }
     Ok(refs)
@@ -547,46 +552,49 @@ pub fn basic_fallback(policy: Option<&Value>) -> Result<Value, String> {
     let mut result = policy.cloned().unwrap_or(Value::Null);
     let custom: Vec<String> = dlp_names_of(Some(&result))?;
     let mut converted = false;
-    if let Some(Value::Array(entries)) = result.get_mut("ai-security-profiles") {
-        for entry in entries.iter_mut() {
-            let Some(detection) = entry
-                .get_mut("model-configuration")
-                .and_then(|model| model.get_mut("data-protection"))
+    // TS 7.3.0: every protection block (§13.17).
+    let places: Vec<crate::profile_policy::Place> = crate::profile_policy::locations(Some(&result))
+        .into_iter()
+        .map(|location| location.place)
+        .collect();
+    for place in &places {
+        let Some(Value::Object(detection)) =
+            crate::profile_policy::configuration_at_mut(&mut result, place)
+                .and_then(|block| block.get_mut("data-protection"))
                 .and_then(|protection| protection.get_mut("data-leak-detection"))
-            else {
-                continue;
-            };
-            let names_custom = detection
-                .get("member")
-                .and_then(Value::as_array)
-                .is_some_and(|members| {
-                    members.iter().any(|member| {
-                        member
-                            .get("text")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| custom.iter().any(|name| name == text))
-                    })
-                });
-            if !names_custom {
-                continue;
-            }
-            let action = detection.get("action").and_then(Value::as_str);
-            if !matches!(action, Some("block" | "allow" | "")) {
-                return Err("Cannot safely fall back to Basic: unsupported DLP action".into());
-            }
-            if truthy(detection.get("mask-data-inline")) && action != Some("block") {
-                return Err(
-                    "Cannot safely fall back to Basic: inline masking requires a block action"
-                        .into(),
-                );
-            }
-            detection["member"] = if action == Some("") {
-                Value::Null
-            } else {
-                json!([{"text": "sensitive content", "id": "", "version": "2"}])
-            };
-            converted = true;
+        else {
+            continue;
+        };
+        let names_custom = detection
+            .get("member")
+            .and_then(Value::as_array)
+            .is_some_and(|members| {
+                members.iter().any(|member| {
+                    member
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .is_some_and(|text| custom.iter().any(|name| name == text))
+                })
+            });
+        if !names_custom {
+            continue;
         }
+        let action = detection.get("action").and_then(Value::as_str);
+        if !matches!(action, Some("block" | "allow" | "")) {
+            return Err("Cannot safely fall back to Basic: unsupported DLP action".into());
+        }
+        if truthy(detection.get("mask-data-inline")) && action != Some("block") {
+            return Err(
+                "Cannot safely fall back to Basic: inline masking requires a block action".into(),
+            );
+        }
+        let member = if action == Some("") {
+            Value::Null
+        } else {
+            json!([{"text": "sensitive content", "id": "", "version": "2"}])
+        };
+        detection.insert("member".into(), member);
+        converted = true;
     }
     if !converted {
         return Err(
@@ -598,8 +606,13 @@ pub fn basic_fallback(policy: Option<&Value>) -> Result<Value, String> {
     {
         map.insert("dlp-data-profiles".into(), Value::Array(Vec::new()));
     }
-    scm::airs::management::models::Policy::parse(result.clone(), scm::validation::Mode::Request)
-        .map_err(|_| invalid_profile_body())?;
+    // The TypeScript 0.35.0 policy root, as the SDK's create and update apply (§15.25).
+    scm::validation::parse(
+        "typescript:0.35.0:PolicySchema",
+        result.clone(),
+        scm::validation::Mode::Request,
+    )
+    .map_err(|_| invalid_profile_body())?;
     Ok(result)
 }
 
@@ -713,12 +726,19 @@ pub fn js_equal(a: &Value, b: &Value) -> bool {
     }
 }
 
-/// TS `canonicalPolicy`: an absent `database-security` in a `data-protection` object reads
-/// as `null` (the observed API normalisation).
+/// TS `canonicalPolicy`: an absent `database-security` in a legacy entry's
+/// `data-protection` object reads as `null` (the observed API normalisation). TS 7.3.0
+/// leaves directional entries as read (§13.17).
 pub fn canonical_policy(policy: Option<&Value>) -> Option<Value> {
     let mut value = policy.cloned()?;
     if let Some(Value::Array(entries)) = value.get_mut("ai-security-profiles") {
         for entry in entries {
+            if entry
+                .as_object()
+                .is_some_and(crate::profile_policy::is_directional)
+            {
+                continue;
+            }
             if let Some(Value::Object(protection)) = entry
                 .get_mut("model-configuration")
                 .and_then(|model| model.get_mut("data-protection"))
@@ -900,13 +920,10 @@ pub fn topic_body(name: &str, source: &Value) -> Value {
     Value::Object(body)
 }
 
-/// Whether a profile body passes the SDK request schema.
+/// Whether a profile body passes the SDK request schema (the TypeScript 0.35.0 root the
+/// SDK's create and update apply, §15.25).
 pub fn valid_profile_body(body: &Value) -> bool {
-    scm::airs::management::models::CreateSecurityProfileRequest::parse(
-        body.clone(),
-        scm::validation::Mode::Request,
-    )
-    .is_ok()
+    crate::policy::request_body(body.clone()).is_some()
 }
 
 /// Stage 1 (no request): the file's latest profiles, their tenant, one revision per name,

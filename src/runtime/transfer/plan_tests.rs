@@ -882,3 +882,67 @@ fn unchanged_normalises_only_database_security() {
     assert!(!unchanged(Some(&current), &prior));
     assert!(!unchanged(None, &prior));
 }
+
+/// TS 7.3.0 (§13.17): the DLP walk, the Basic fallback and the canonical policy cover a
+/// directional entry's directions and its retained `model-configuration`; the
+/// canonical `database-security: null` applies to legacy entries only.
+#[test]
+fn directional_sections_are_walked() {
+    let mut policy = airs_test_harness::fixtures::runtime::directional_profile()["policy"].clone();
+    let entry = &mut policy["ai-security-profiles"][0];
+    entry["content-type-configurations"]["response"]["data-protection"]["data-leak-detection"]["member"] =
+        json!([{"text": "My Profile", "id": "dp-1", "version": "1"}]);
+    entry["model-configuration"]["data-protection"] = json!({"data-leak-detection": {
+        "action": "block", "member": [{"text": "Retained", "id": "dp-2"}]}});
+    let refs = dlp_references(Some(&policy)).unwrap();
+    let found: Vec<(String, Vec<PathStep>)> = refs
+        .iter()
+        .map(|reference| (reference.name.clone(), reference.path.clone()))
+        .collect();
+    let path = |block: &[&str], at: usize| {
+        let mut steps = vec![
+            PathStep::Key("ai-security-profiles".into()),
+            PathStep::Index(0),
+        ];
+        steps.extend(block.iter().map(|key| PathStep::Key((*key).into())));
+        steps.extend([
+            PathStep::Key("data-protection".into()),
+            PathStep::Key("data-leak-detection".into()),
+            PathStep::Key("member".into()),
+            PathStep::Index(at),
+        ]);
+        steps
+    };
+    assert_eq!(
+        found,
+        vec![
+            ("Retained".to_owned(), path(&["model-configuration"], 0)),
+            (
+                "My Profile".to_owned(),
+                path(&["content-type-configurations", "response"], 0)
+            ),
+        ],
+        "the built-in Basic members of the other directions are not references"
+    );
+    let fallback = basic_fallback(Some(&policy)).unwrap();
+    let basic = json!([{"text": "sensitive content", "id": "", "version": "2"}]);
+    let entry = &fallback["ai-security-profiles"][0];
+    assert_eq!(
+        entry["content-type-configurations"]["response"]["data-protection"]["data-leak-detection"]
+            ["member"],
+        basic
+    );
+    assert_eq!(
+        entry["model-configuration"]["data-protection"]["data-leak-detection"]["member"],
+        basic
+    );
+    let mut legacy_and_directional = json!({"ai-security-profiles": [
+        {"model-configuration": {"data-protection": {}}},
+        {"content-type-mode": "per_content_type", "model-configuration": {"data-protection": {}},
+         "content-type-configurations": {"prompt": {"data-protection": {}}}}
+    ]});
+    let canonical = canonical_policy(Some(&legacy_and_directional)).unwrap();
+    legacy_and_directional["ai-security-profiles"][0]["model-configuration"]["data-protection"]["database-security"] =
+        Value::Null;
+    assert_eq!(canonical, legacy_and_directional);
+}
