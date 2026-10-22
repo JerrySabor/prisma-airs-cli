@@ -3,7 +3,7 @@
 Release notes for each version are in [docs/RELEASE-NOTES/](docs/RELEASE-NOTES/). This
 file records the changes to the repository itself.
 
-## Unreleased (8.0.0)
+## 8.0.0 (2026-10-22)
 
 ### The Rust CLI replaces the TypeScript CLI in this repository
 
@@ -21,9 +21,9 @@ file records the changes to the repository itself.
   (D331), the npm launcher package and `scripts/npm-package.sh`, the Rust docs site in
   `docs-site/` with a command reference generated from `--help`, and `NOTICE` in the
   crate, the release tarballs and the npm packages.
-- **Next.** The bounded live run of the 7.3.0 port and its review, then one 8.0.0 release
-  on crates.io, npm, Homebrew, the Forgejo release and the docs site. There is no 1.0.1 or
-  1.1.0 release.
+- **Release.** One 8.0.0 release on crates.io, npm, Homebrew, the Forgejo release and the
+  docs site, after the live run of the 7.3.0 port and its review. There is no 1.0.1 or
+  1.1.0 release. Notes: `docs/RELEASE-NOTES/8.0.0.md`.
 
 ### The TypeScript CLI 7.3.0 port
 
