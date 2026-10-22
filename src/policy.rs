@@ -186,6 +186,16 @@ impl Flags {
         (self.dlp_profiles_given || self.mask_data_inline.is_some()) && self.dlp_action.is_none()
     }
 
+    /// Whether the flags put anything into a direction of a directional create, that is
+    /// whether any flag besides the shared settings (latency, storage masking,
+    /// conversation inspection) was given. D336: without one, all four directions would be
+    /// empty, which the service refuses.
+    pub fn fills_a_direction(&self) -> bool {
+        let mut config = model_configuration(self, true);
+        layout::extract_shared(&mut config);
+        !config.is_empty()
+    }
+
     /// TS 7.3.0 `hasAnyProtectionFlag`: every protection and shared-setting flag.
     pub fn any_protection(&self) -> bool {
         self.prompt_injection.is_some()
@@ -1058,6 +1068,36 @@ mod tests {
             unmasked["policy"]["ai-security-profiles"][0]["model-configuration"]["mask-data-in-storage"],
             json!(false)
         );
+    }
+
+    /// D336: shared settings alone fill no direction; every protection flag does.
+    #[test]
+    fn only_protection_flags_fill_a_direction() {
+        let shared_only: [fn(&mut PolicyFlags); 5] = [
+            |_| {},
+            |raw| raw.max_inline_latency = Some("8".into()),
+            |raw| raw.inline_timeout_action = Some("allow".into()),
+            |raw| raw.no_mask_data_in_storage = true,
+            |raw| raw.enable_full_conversation_inspection = true,
+        ];
+        for edit in shared_only {
+            assert!(!flags(edit).fills_a_direction());
+        }
+        let protections: [fn(&mut PolicyFlags); 6] = [
+            |raw| raw.prompt_injection = Some("block".into()),
+            |raw| raw.toxic_content = Some("block".into()),
+            |raw| raw.malicious_code = Some("block".into()),
+            |raw| raw.url_action = Some("alert".into()),
+            |raw| raw.agent_security = Some("block".into()),
+            |raw| raw.dlp_action = Some("block".into()),
+        ];
+        for edit in protections {
+            let flags = flags(|raw| {
+                edit(raw);
+                raw.max_inline_latency = Some("8".into());
+            });
+            assert!(flags.fills_a_direction());
+        }
     }
 
     /// D335: the flags fill the selected direction and the other three known directions

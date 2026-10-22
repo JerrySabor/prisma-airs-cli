@@ -57,12 +57,39 @@ file records the changes to the repository itself.
   direction. Accepted by a live run against a tenant (2026-10-22) for each of the four
   directions. A flag create with `--direction` writes the other three directions as empty
   objects, because the service refuses a directional profile without all four (D335;
-  TypeScript 7.3.0's one-direction body is refused with HTTP 400).
+  TypeScript 7.3.0's one-direction body is refused with HTTP 400). A directional flag create
+  whose flags fill no direction (none, or shared settings only) is refused before OAuth
+  (exit 2) with a text naming the service rule (D336; TypeScript 7.3.0 sends a shared-only
+  create, which the service refuses, and its text for a flagless one points at `--config`,
+  whose empty policy the service refuses too).
+- **Known limitations of directional profiles.**
+  Directional profiles are **supported, for single-entry profiles**: a live run (2026-10-22)
+  accepted every direction for creates, edits, topics, backup and restore.
+
+  - **Not verified live:** profiles with several AI entries (`--ai-profile-index`), DLP blocks
+    inside a direction (`--dlp-action`, `--dlp-profiles`), and the runtime report's
+    `Protection configurations` column. The offline tests cover them.
+  - **Service rules are not checked before sending, except one.** Every directional entry needs
+    all four direction keys (`prompt`, `response`, `tool-call`, `tool-response`; a flag create
+    writes the ones it does not fill as `{}`, and a `--config` body must list all four); the
+    `response` direction refuses `prompt-injection`; and `toxic-content` takes only `block` or
+    `allow` for each level. A write that breaks one fails with HTTP 400 (exit 1), and no
+    response body is shown. The exception (D336): a directional flag create with no protection
+    flag (none, or shared settings only) is refused before anything is sent (exit 2), because
+    the service refuses a policy with no protection in any direction. A `--config` body with
+    four empty directions is still sent, and refused.
+  - **`dlp_tenant_id` on writes.** These writes do not send `dlp_tenant_id`: a flag
+    `profiles update`, `topics apply` and `revert`, `profiles restore` (create and overwrite),
+    and `profiles update --config` when the file leaves the key out. The service's answer then
+    reports `dlpTenantId: "none"`; the effect on the profile's stored DLP tenant binding is
+    unknown. No `get` or `list` returns the field, so the CLI cannot carry it over. This
+    matches the TypeScript CLI 7.3.0 and affects legacy profiles too. A `--config` file that
+    holds `dlp_tenant_id` sends it.
 - **The rest of 7.3.0.** Highest-revision profile lookups in `topics apply|revert`; ref and
   group metadata kept; every profile body validated with the 0.35.0 request schema;
   `profiles create|update` print a status line and the banner-less detail and honour the
   tenant's `defaultOutput`; `--active` only when given; the `malicious-code` name on the
   update merge path; `--dlp-profiles` and `--[no-]mask-data-inline` without `--dlp-action`
   on update; `revert` refuses a topic the profile does not reference.
-- **§12 rows.** New: D332, D333, D334, D335. Retired: D117. Reworded: D26, D50, D93, D94, D96,
+- **§12 rows.** New: D332–D336. Retired: D117. Reworded: D26, D50, D93, D94, D96,
   D98–D103, D106, D115, D116.

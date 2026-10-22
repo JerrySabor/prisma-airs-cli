@@ -14,7 +14,9 @@
 use crate::error::CliError;
 use serde_json::{Map, Value};
 
-/// The directions TypeScript 7.3.0 knows, in its order (`PROFILE_DIRECTIONS`).
+/// The directions TypeScript 7.3.0 knows, in its order (`PROFILE_DIRECTIONS`). It is also
+/// the set of keys the live service requires on every directional entry (each may be `{}`;
+/// observed in B7, D335), which a directional flag create therefore writes in full.
 pub const DIRECTIONS: [&str; 4] = ["prompt", "response", "tool-call", "tool-response"];
 
 /// The one content-type mode whose behaviour is established.

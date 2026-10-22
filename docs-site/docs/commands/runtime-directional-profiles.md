@@ -5,23 +5,12 @@ sidebar_position: 4
 
 # Directional security profiles
 
-:::note Live acceptance
+:::note Supported, for single-entry profiles
 Directional profiles follow the TypeScript CLI 7.3.0 and `scm-sdk` 0.2.4. A live run against
 a tenant (2026-10-22) accepted flag and `--config` creates, a protection edit of each
 direction, shared-settings edits, a topic applied and reverted in each direction, and backup
-and restore. Not yet exercised live: profiles with several AI entries (`--ai-profile-index`)
-and DLP blocks inside a direction.
+and restore. Read the [known limitations](#known-limitations) before relying on them.
 :::
-
-The service applies rules of its own; a write that breaks one fails with HTTP 400 (exit 1),
-and nothing is written:
-
-- A directional entry must hold all four direction keys. A flag create writes the directions
-  it does not fill as empty objects (`{}`); a `--config` body must list all four.
-- A policy whose directions are all empty is refused.
-- The `response` direction refuses `prompt-injection`.
-- `toxic-content` takes `block` or `allow` for each level (`high:block, moderate:allow`), not
-  `alert`.
 
 A security profile's policy holds AI entries (`ai-security-profiles`). Two layouts exist:
 
@@ -50,18 +39,20 @@ airs runtime profiles create --name Directional --direction response \
 airs runtime profiles create --config ./directional.json --output json
 ```
 
-Directional flag creation needs at least one protection or shared setting, and the service
-also refuses a profile whose four directions are all empty, so give at least one protection.
-The flags fill the `--direction` you name; the other three directions are written empty, so
-a later `update --direction` can fill any of them. A DLP block needs `--dlp-action` on a
-create.
+Directional flag creation needs at least one protection flag. Shared settings alone
+(`--max-inline-latency`, `--inline-timeout-action`, `--[no-]mask-data-in-storage`,
+`--[no-]enable-full-conversation-inspection`) are refused before anything is sent (exit 2),
+because the service refuses a profile with no protection in any direction (the TypeScript CLI
+sends that create, and the service refuses it). The flags fill the `--direction` you name;
+the other three directions are written empty, so a later `update --direction` can fill any of
+them. A DLP block needs `--dlp-action` on a create.
 
 ## Updating
 
 ```bash
 # Edit only the response protections; every other direction and severity stays
 airs runtime profiles update Directional --direction response \
-  --toxic-content 'high:alert, moderate:allow' --no-mask-data-inline
+  --toxic-content 'high:block, moderate:block' --no-mask-data-inline
 
 # Shared settings need no direction and keep every direction
 airs runtime profiles update Directional --max-inline-latency 8 \
@@ -108,9 +99,9 @@ for legacy profiles.
 
 ## Reading
 
-- `airs runtime profiles get` shows `DLP tenant` (when the service returns one) and
-  `Protection locations` (`AI[0] default / prompt, AI[0] default / response, …`). JSON adds
-  `dlpTenantId` (a string); a GET may omit it. A value the service sends that the schema does
+- `airs runtime profiles get` shows `Protection locations` (`AI[0] default / prompt, AI[0]
+  default / response, …`), and `DLP tenant` (JSON `dlpTenantId`, a string) only when the
+  record carries one; in the live run no `get` or `list` returned it. A value the service sends that the schema does
   not expect (a `null`, a number) is printed as sent; the TypeScript CLI refused such a read.
 - A `--config` file is checked before the tenant is read: `dlp_tenant_id` must be a string,
   `content-type-mode` a string, each direction an object and
@@ -121,5 +112,30 @@ for legacy profiles.
   fallback and topic remapping work per direction, and `--on-conflict verify` compares
   directions strictly. A backup keeps each record as the service sent it; a restore does not
   send the source tenant's `dlp_tenant_id`.
+
+## Known limitations
+
+Directional profiles are **supported, for single-entry profiles**: a live run (2026-10-22)
+accepted every direction for creates, edits, topics, backup and restore.
+
+- **Not verified live:** profiles with several AI entries (`--ai-profile-index`), DLP blocks
+  inside a direction (`--dlp-action`, `--dlp-profiles`), and the runtime report's
+  `Protection configurations` column. The offline tests cover them.
+- **Service rules are not checked before sending, except one.** Every directional entry needs
+  all four direction keys (`prompt`, `response`, `tool-call`, `tool-response`; a flag create
+  writes the ones it does not fill as `{}`, and a `--config` body must list all four); the
+  `response` direction refuses `prompt-injection`; and `toxic-content` takes only `block` or
+  `allow` for each level. A write that breaks one fails with HTTP 400 (exit 1), and no
+  response body is shown. The exception (D336): a directional flag create with no protection
+  flag (none, or shared settings only) is refused before anything is sent (exit 2), because
+  the service refuses a policy with no protection in any direction. A `--config` body with
+  four empty directions is still sent, and refused.
+- **`dlp_tenant_id` on writes.** These writes do not send `dlp_tenant_id`: a flag
+  `profiles update`, `topics apply` and `revert`, `profiles restore` (create and overwrite),
+  and `profiles update --config` when the file leaves the key out. The service's answer then
+  reports `dlpTenantId: "none"`; the effect on the profile's stored DLP tenant binding is
+  unknown. No `get` or `list` returns the field, so the CLI cannot carry it over. This
+  matches the TypeScript CLI 7.3.0 and affects legacy profiles too. A `--config` file that
+  holds `dlp_tenant_id` sends it.
 
 The behavioural contract is DESIGN §13.17 in the repository.

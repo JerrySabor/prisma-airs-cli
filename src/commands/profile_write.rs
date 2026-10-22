@@ -66,6 +66,11 @@ const CONFIG_CONFLICT: &str = "--config cannot be combined with profile write fl
 
 const CREATE_PATH: &str = "/v1/mgmt/profile";
 
+/// D336: a directional flag create whose flags fill no direction (TS 7.3.0 refuses only
+/// the create with no flag, pointing at `--config` for an empty policy, which the service
+/// refuses too).
+const DIRECTIONAL_WITHOUT_PROTECTION: &str = "Directional flag creation requires at least one protection flag, not only shared settings: the service refuses a directional policy with no protection in any direction";
+
 pub fn plan_create(
     args: &ProfileCreateArgs,
     format: Option<Format>,
@@ -91,12 +96,16 @@ pub fn plan_create(
     };
     let selector = Selector::parse(args.direction.as_deref(), None)?;
     let flags = Flags::read(&args.policy);
-    if !flags.any_protection() {
-        return Err(CliError::usage(if selector.direction.is_some() {
-            "Directional flag creation requires at least one protection or shared setting; use --config for an empty policy"
-        } else {
-            "Specify at least one policy flag (for example --prompt-injection block) or --config <path>"
-        }));
+    if selector.direction.is_some() {
+        // D336: the service refuses a directional policy whose four directions are all
+        // empty, so a create whose flags fill no direction is refused before OAuth.
+        if !flags.fills_a_direction() {
+            return Err(CliError::usage(DIRECTIONAL_WITHOUT_PROTECTION));
+        }
+    } else if !flags.any_protection() {
+        return Err(CliError::usage(
+            "Specify at least one policy flag (for example --prompt-injection block) or --config <path>",
+        ));
     }
     flags.check()?;
     if flags.dlp_without_action() {

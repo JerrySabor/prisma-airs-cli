@@ -80,7 +80,7 @@ airs runtime topics revert --profile prod-guard --name "Financial Advice"       
   `topics create` and `profiles update` act on the highest revision of a name.
 - **Directional profiles** (8.0) keep their protections per direction; see
   [Directional profiles](./runtime-directional-profiles.md) for `--direction`,
-  `--ai-profile-index` and the layout rules.
+  `--ai-profile-index`, the layout rules and the known limitations.
 - **Confirmations** (`delete` without `--force`) need stdin and stderr to be
   terminals; the prompt is on stderr and only `y`/`yes` confirms. In scripts pass
   `--force` (with `--updated-by <email>`, which selects the force endpoint).

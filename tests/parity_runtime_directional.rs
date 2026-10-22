@@ -124,16 +124,18 @@ fn both_with(
     ))
 }
 
+/// Each write's method and path (the server base removed).
+fn write_lines(side: &Side) -> Vec<String> {
+    side.writes()
+        .iter()
+        .map(|request| request.line().replacen(request.base, "", 1))
+        .collect()
+}
+
 /// Equal exit codes, writes (semantically) and resulting state.
 fn assert_same_writes(rust: &Side, ts: &Side) {
     assert_eq!(rust.run.code, ts.run.code, "{:?}\n{:?}", rust.run, ts.run);
-    let lines = |side: &Side| {
-        side.writes()
-            .iter()
-            .map(|request| request.line().replacen(request.base, "", 1))
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(lines(rust), lines(ts));
+    assert_eq!(write_lines(rust), write_lines(ts));
     for (rust_write, ts_write) in rust.writes().iter().zip(ts.writes()) {
         match (rust_write.body_json(), ts_write.body_json()) {
             (Some(rust_body), Some(ts_body)) => assert_json_semantic_eq(&rust_body, &ts_body),
@@ -660,13 +662,14 @@ mod parity {
         assert_eq!(usage_line(&rust.run.stderr), usage_line(&ts.run.stderr));
     }
 
-    /// Flag creation of one direction (TS `buildProfileRequest` with `--direction`): an
-    /// empty one is refused alike on both CLIs.
+    /// A directional flag create with no policy flag at all (TS `buildProfileRequest` with
+    /// `--direction`) is refused on both CLIs before OAuth (exit 2, no request). The text
+    /// differs (D336, pinned on both sides by
+    /// `divergence::d336_a_directional_flag_create_without_a_protection_is_refused`), and
+    /// the body of a filled create differs by D335
+    /// (`divergence::d335_flag_creation_writes_every_known_direction`).
     #[test]
-    fn flag_creation_of_one_direction() {
-        // The body of a one-direction create differs by D335 (the other three directions
-        // written empty), pinned on both sides by
-        // `divergence::d335_flag_creation_writes_every_known_direction`.
+    fn an_empty_directional_flag_creation_is_refused() {
         let args = profiles(&["create", "--name", "Empty", "--direction", "response"]);
         let Some((rust, ts)) = both(
             "directional_flag_create_empty",
@@ -676,7 +679,9 @@ mod parity {
             return;
         };
         assert_refused_without_writes(&rust, &ts);
-        assert_eq!(usage_line(&rust.run.stderr), usage_line(&ts.run.stderr));
+        for side in [&rust, &ts] {
+            assert!(side.requests.is_empty(), "before OAuth: {:?}", side.run);
+        }
     }
 
     /// Several AI entries: `--ai-profile-index` selects one, also for shared settings;
@@ -1023,8 +1028,12 @@ mod divergence {
         };
         rust.run.assert_success();
         ts.run.assert_success();
-        assert_eq!(rust.writes().len(), 1);
-        assert_eq!(ts.writes().len(), 1);
+        assert_eq!(
+            write_lines(&rust),
+            write_lines(&ts),
+            "the same method and path"
+        );
+        assert_eq!(write_lines(&rust), ["POST /aisec/v1/mgmt/profile"]);
         let selected = json!({
             "model-protection": [{"name": "prompt-injection", "action": "block"}],
             "app-protection": {"malicious-code-protection": {"name": "malicious-code", "action": "block"}}
@@ -1055,6 +1064,82 @@ mod divergence {
         rust_rest.as_object_mut().unwrap().remove("policy");
         ts_rest.as_object_mut().unwrap().remove("policy");
         assert_eq!(rust_rest, ts_rest, "the rest of the body is the same");
+    }
+
+    /// D336: a directional flag create whose flags fill no direction (no policy flag, or
+    /// shared settings only) is refused before OAuth (exit 2), because the live service
+    /// refuses a directional policy with no protection in any direction (HTTP 400, B7).
+    /// TypeScript 7.3.0 refuses only the create with no flag at all, with a text that
+    /// points at `--config` for an empty policy, and sends a shared-only create (its
+    /// `{<d>: {}}` body; the fixture server accepts it).
+    #[test]
+    fn d336_a_directional_flag_create_without_a_protection_is_refused() {
+        const D336: &str = "Directional flag creation requires at least one protection flag, \
+                            not only shared settings: the service refuses a directional policy \
+                            with no protection in any direction";
+        let args = profiles(&["create", "--name", "Empty", "--direction", "response"]);
+        let Some((rust, ts)) = both("d336_empty", &directional(), &refs(&args)) else {
+            return;
+        };
+        for side in [&rust, &ts] {
+            assert_eq!(side.run.code, 2, "{:?}", side.run);
+            assert!(side.requests.is_empty(), "before OAuth: {:?}", side.run);
+        }
+        assert_eq!(usage_line(&rust.run.stderr).as_deref(), Some(D336));
+        assert_eq!(
+            usage_line(&ts.run.stderr).as_deref(),
+            Some(
+                "Directional flag creation requires at least one protection or shared \
+                 setting; use --config for an empty policy"
+            )
+        );
+        for (direction, shared, stored) in [
+            (
+                "prompt",
+                &["--max-inline-latency", "8"][..],
+                json!({"latency": {"max-inline-latency": 8}}),
+            ),
+            (
+                "response",
+                &["--inline-timeout-action", "allow"],
+                json!({"latency": {"inline-timeout-action": "allow"}}),
+            ),
+            (
+                "tool-call",
+                &["--no-mask-data-in-storage"],
+                json!({"mask-data-in-storage": false}),
+            ),
+            (
+                "tool-response",
+                &["--enable-full-conversation-inspection"],
+                json!({"enable-full-conversation-inspection": true}),
+            ),
+        ] {
+            let mut args = profiles(&["create", "--name", "Shared", "--direction", direction]);
+            args.extend(shared.iter().map(|arg| (*arg).to_owned()));
+            let Some((rust, ts)) = both("d336_shared", &directional(), &refs(&args)) else {
+                return;
+            };
+            assert_eq!(rust.run.code, 2, "{direction}: {:?}", rust.run);
+            assert!(rust.requests.is_empty(), "{direction}: before OAuth");
+            assert_eq!(usage_line(&rust.run.stderr).as_deref(), Some(D336));
+            ts.run.assert_success();
+            assert_eq!(
+                write_lines(&ts),
+                ["POST /aisec/v1/mgmt/profile"],
+                "{direction}"
+            );
+            assert_eq!(
+                ts.body()["policy"],
+                json!({"ai-security-profiles": [{
+                    "model-type": "default",
+                    "content-type-mode": "per_content_type",
+                    "model-configuration": stored,
+                    "content-type-configurations": {direction: {}}
+                }]}),
+                "{direction}: TypeScript sends the shared settings and an empty direction"
+            );
+        }
     }
 }
 

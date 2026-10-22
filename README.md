@@ -54,7 +54,7 @@ or 1.1.0 release.
 | M6e Gateway inference and report | `gateway inference chat/responses/embeddings`, `gateway report` (alias `dashboard`, the HTML environment report) |
 | M6e Gateway doctor | the doctor's `Gateway API` check |
 | M6f Supplychain (0.11) | `supplychain scans list/vulnerabilities`, `supplychain stats`, `supplychain rules list`, `supplychain report` (the HTML environment report) |
-| 8.0 TypeScript 7.3.0 port | directional security profiles on `runtime profiles create/update` (`--direction`, `--ai-profile-index`, `--[no-]enable-full-conversation-inspection`, `--no-mask-data-inline`, `--no-mask-data-in-storage`) and `runtime topics apply/revert`; the profile views, the runtime report and profile backup and restore read directions (experimental) |
+| 8.0 TypeScript 7.3.0 port | directional security profiles on `runtime profiles create/update` (`--direction`, `--ai-profile-index`, `--[no-]enable-full-conversation-inspection`, `--no-mask-data-inline`, `--no-mask-data-in-storage`) and `runtime topics apply/revert`; the profile views, the runtime report and profile backup and restore read directions (supported, for single-entry profiles; see the known limitations below) |
 
 `markdown`, `csv` and `yaml` output are dropped, and so is `runtime dlp generate`. The
 TypeScript `aigateway` group is `gateway` here, with no `aigateway` alias, and `agentguard` is
@@ -393,20 +393,14 @@ A directional profile keeps its protections per direction (`prompt`, `response`,
 `tool-call`, `tool-response`) under `content-type-configurations`, and its shared settings
 (latency, storage masking, conversation inspection) in `model-configuration`. Legacy
 profiles need no migration. This follows the TypeScript CLI 7.3.0 and `scm-sdk` 0.2.4. A
-live run (2026-10-22) accepted creates, edits of each direction and of the shared settings,
-topics in each direction, and backup and restore.
-
-The service requires all four direction keys in a directional profile. A flag create
-therefore writes the three directions it does not fill as empty objects (the TypeScript CLI
-writes only one, which the service refuses), and a `--config` body must hold all four. The
-service also refuses `prompt-injection` in the `response` direction, a policy whose
-directions are all empty, and `toxic-content` levels other than `block` and `allow`; these
-refusals are HTTP 400 errors (exit 1).
+flag create writes the three directions it does not fill as empty objects, because the
+service requires all four direction keys (the TypeScript CLI writes only one, which the
+service refuses, D335).
 
 ```sh
 airs runtime profiles create --name Directional --direction response \
   --toxic-content 'high:block, moderate:allow' --no-enable-full-conversation-inspection
-airs runtime profiles update Directional --direction response --toxic-content alert --no-mask-data-inline
+airs runtime profiles update Directional --direction response --toxic-content 'high:block, moderate:block' --no-mask-data-inline
 airs runtime profiles update Directional --max-inline-latency 8 --no-mask-data-in-storage   # shared: no direction
 airs runtime profiles update Directional --config directional.json   # complete replacement (adds a direction)
 airs runtime topics apply --profile Directional --name Restricted --direction prompt
@@ -420,11 +414,37 @@ airs runtime topics revert --profile Directional --name Restricted --direction p
 - These refusals come after the profile is read and write nothing (exit 2).
 - `topics revert --direction` refuses while another direction, AI entry or a retained
   legacy block still references the topic.
-- `profiles get` shows `DLP tenant` and `Protection locations`; json adds `dlpTenantId`.
-  Settings you do not pass are never written; unknown directions are kept; a `--config`
+- `profiles get` shows `Protection locations`, and `DLP tenant` (json `dlpTenantId`) only when
+  the record carries one; in the live run no `get` or `list` returned it. Settings you do
+  not pass are never written; unknown directions are kept; a `--config`
   file's new fields are checked before the tenant (a string `dlp_tenant_id`, never `null`).
   `runtime report` adds a `Protection configurations` column, and profile backup and
   restore carry every direction.
+
+#### Known limitations of directional profiles
+
+Directional profiles are **supported, for single-entry profiles**: a live run (2026-10-22)
+accepted every direction for creates, edits, topics, backup and restore.
+
+- **Not verified live:** profiles with several AI entries (`--ai-profile-index`), DLP blocks
+  inside a direction (`--dlp-action`, `--dlp-profiles`), and the runtime report's
+  `Protection configurations` column. The offline tests cover them.
+- **Service rules are not checked before sending, except one.** Every directional entry needs
+  all four direction keys (`prompt`, `response`, `tool-call`, `tool-response`; a flag create
+  writes the ones it does not fill as `{}`, and a `--config` body must list all four); the
+  `response` direction refuses `prompt-injection`; and `toxic-content` takes only `block` or
+  `allow` for each level. A write that breaks one fails with HTTP 400 (exit 1), and no
+  response body is shown. The exception (D336): a directional flag create with no protection
+  flag (none, or shared settings only) is refused before anything is sent (exit 2), because
+  the service refuses a policy with no protection in any direction. A `--config` body with
+  four empty directions is still sent, and refused.
+- **`dlp_tenant_id` on writes.** These writes do not send `dlp_tenant_id`: a flag
+  `profiles update`, `topics apply` and `revert`, `profiles restore` (create and overwrite),
+  and `profiles update --config` when the file leaves the key out. The service's answer then
+  reports `dlpTenantId: "none"`; the effect on the profile's stored DLP tenant binding is
+  unknown. No `get` or `list` returns the field, so the CLI cannot carry it over. This
+  matches the TypeScript CLI 7.3.0 and affects legacy profiles too. A `--config` file that
+  holds `dlp_tenant_id` sends it.
 
 The full guide is on the docs site: [Directional profiles](https://cdot65.github.io/prisma-airs-cli/commands/runtime-directional-profiles).
 

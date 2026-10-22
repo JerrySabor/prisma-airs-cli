@@ -72,7 +72,7 @@ PUT on that profile. 63 probe runs: 36 accepted, 27 refused.
 | `tool-response: {}`, or one section only, in an otherwise full policy | accepted |
 | Removing `data-protection`, `agent-protection`, `model-protection` or `app-protection` (or any one `app-protection` key) from `prompt` | accepted |
 | `prompt-injection` added to `response` | 400 (repeated) |
-| `toxic-content` `high:block, moderate:alert` in any direction | 400; `moderate:block` and `moderate:allow` accepted |
+| `toxic-content` `high:block, moderate:alert` | 400 (seen once, below); `moderate:block` and `moderate:allow` accepted |
 | `dlp_tenant_id: "<TSG>"` added to an accepted body | accepted |
 
 **Transient refusals.** Four consecutive PUTs (removing `app-protection`, `default-url-category`,
@@ -80,7 +80,7 @@ the three URL-category objects, `url-detected-severity`) were refused with 400 a
 accepted when re-sent unchanged a few minutes later. Four identical control PUTs in a row all
 succeeded. These four are not counted as rules.
 
-Request IDs of the deterministic refusals, for the service owner: one-direction flag creates
+Request IDs of the refusals taken as rules, for the service owner: one-direction flag creates
 `b26a63b4-3683-4d55-92fb-edc449928c2b` (prompt), `9d059b14-ef40-418f-94cf-b954a638b151`
 (response), `72bc2bfc-c1d6-4ab5-9507-703651e7107f` (tool-call),
 `c0e61a53-080e-445d-8166-62377796a113` (tool-response); a missing direction
@@ -89,17 +89,26 @@ Request IDs of the deterministic refusals, for the service owner: one-direction 
 directions `3ed44707-ade5-4071-981e-617d7008b825`; a toxic `alert` level
 `ac1b73e7-3f86-4ad9-87fc-4df569e2b347`.
 
+**The toxic `alert` refusal was seen once.** This record gives one request ID for it and no
+repeat count (unlike the `prompt-injection` and missing-direction refusals, which were
+repeated). It might have been one of the transient 400s above. The rule below rests on that
+one refusal; the CLI's documentation follows it and uses only `block` and `allow`.
+
 ## Service rules found
 
 1. A directional entry must hold all four direction keys; any of them may be `{}`. The
    request schema (TS SDK 0.35.0, scm-sdk 0.2.4) marks each direction optional. TypeScript
    7.3.0's flag builder writes only the selected one, so its flag create can never succeed.
    **D335** makes the Rust flag create write the other three as `{}`.
-2. A policy whose four directions are all empty is refused. The CLI keeps TypeScript's local
-   rule (at least one protection or shared setting); a shared-only directional flag create
-   therefore reaches the service and fails with 400.
+2. A policy whose four directions are all empty is refused, also with the shared settings
+   set. At the time of the run the CLI kept TypeScript's local rule (at least one protection
+   or shared setting), so a shared-only directional flag create reached the service and
+   failed with 400. **D336** (after the run, offline) refuses such a create locally (exit 2,
+   before OAuth), naming this rule. A `--config` body with four empty directions is still
+   sent.
 3. `response` refuses `prompt-injection`. `tool-call` and `tool-response` accept it.
-4. `toxic-content` takes `block` or `allow` per level; `alert` is refused.
+4. `toxic-content` takes `block` or `allow` per level; `alert` was refused (seen once; see
+   above).
 5. The service adds `severity` to detectors and URL actions, `severity-by-confidence` to
    `toxic-content`, `default-url-category: {member: null}`, and an empty `data-leak-detection`
    (`action: ""`, `member: null`) where a section is present. It adds nothing to an empty
@@ -119,23 +128,60 @@ directions `3ed44707-ade5-4071-981e-617d7008b825`; a toxic `alert` level
   next PUT (step 6, a flag update, which sends `{profile_name, active, policy}`) answered
   `"none"`. On `P-probe-b`, a `--config` PUT carrying `<TSG>` answered `<TSG>`, and the next
   PUT without it answered `"none"`.
-- Conclusion: as far as the service reports it, a PUT that omits `dlp_tenant_id` clears the
-  value (to the string `"none"`). It is not kept. The stored value cannot be read back
-  directly. The CLI prints each answer as sent (`"dlpTenantId": "none"` in the json of every
-  flag update in steps 6–10), and a restore never sends the source's value (DESIGN §13.17),
-  as before.
+- Conclusion: the answer reports `none`; the effect on the stored binding is unknown. A
+  `"none"` in a write answer may only reflect the request, not the stored state, and no read
+  returns the field, so this run cannot tell a cleared binding from a kept one. The CLI prints
+  each answer as sent (`"dlpTenantId": "none"` in the json of every flag update in steps
+  6–10).
+- Every CLI write that changes a profile omits `dlp_tenant_id` unless a `--config` file holds
+  it: a flag `profiles update`, `topics apply|revert`, a restore (create and overwrite; it
+  never sends the source's value, DESIGN §13.17), and a `profiles update --config` whose
+  file leaves the key out. TypeScript 7.3.0 does the same. This applies to legacy profiles
+  too; the CLI cannot keep the value because no read returns it.
+
+### Open question for the service owner
+
+Does a create or PUT that omits `dlp_tenant_id` clear a profile's stored DLP tenant binding,
+or does the write answer only echo the request (`"none"` when the key is absent)? The run
+recorded no request ID for the `dlp_tenant_id` observations themselves (step 4's create
+answering `<TSG>`, step 6's PUT answering `"none"`, and the two `P-probe-b` PUTs). They were
+made in run `20261022200128` on 2026-10-22 against `redtail-prod`, on the profiles
+`airs-rs-live-20261022200128-config` and `airs-rs-live-20261022200128-probe-b`, in the same
+session as the request IDs listed above (for example `b26a63b4-3683-4d55-92fb-edc449928c2b`,
+`04916dac-85d0-4a6b-a07e-e8dd02f49bc6` and `3ed44707-ade5-4071-981e-617d7008b825`), which
+locate the run in the service's logs.
+
+**The distinguishing test (not run).** Copy a DLP-bound profile under a run-prefixed name with
+`profiles create --config`, the file holding its policy and `"dlp_tenant_id": "<TSG>"` (as
+step 4 sent it; a backup and restore would not send the value). Run a DLP-triggering scan
+against the copy: it must detect, or the copy is not bound and the test shows nothing.
+Update the copy through the CLI with a change unrelated to DLP (for example `profiles update
+<copy> --max-inline-latency <n>`, which omits `dlp_tenant_id`). Run the same scan again. If DLP still detects, the binding is kept and the `"none"` only
+echoes the request; if it no longer does, the omitted key cleared it. Then delete every
+revision of the copy. This needs a DLP-bound profile and a scan budget, and it has not been
+run.
 
 ## Departures from the live test rules (MILESTONES)
 
+The maintainer's release brief for B7 set the `airs-rs-live-` prefix and authorised the run.
+The departures below follow from it. The maintainer waived them for B7, given that the final
+listing matched the preflight's (step 25).
+
 - The prefix is `airs-rs-live-`, as the B7 brief asked, not the live tier's `airs-rs-e2e-`, so
-  the `live_cleanup` sweeper would not find a leftover. None was left (step 25).
+  the `live_cleanup` sweeper does not recognise it and would not find a leftover. None was
+  left (step 25).
 - The run was not a `tests/live.rs` flow. It used the Rust CLI only (TypeScript 7.3.0's flag
   create sends the body that step 1 shows refused) and its own tenant store, not a private
   import under `target/live/`. Writes were journalled in a step log outside the repository,
   not in `target/live/ledger.jsonl`.
 - It created 11 named resources (6 profiles, one of them twice through the restore, and 4
-  topics), one over the cap of 10. With the 50 further revisions the probes, edits and topic
+  topics), against the cap of 10. With the 50 further revisions the probes, edits and topic
   writes made, it deleted 61 records in all (57 profile revisions, 4 topics).
+- There is no `target/live/ledger.jsonl` ledger for it (see the step log above).
+- Follow-up, not implemented: a Rust-only directional step in the live tier's
+  `live_write_flow` (`tests/live.rs`, recorded under D93 like the other Rust-only steps), so a
+  later run repeats this inside the tier's rules (the `airs-rs-e2e-` prefix, the ledger, the
+  cap). It must stay within the cap of 10 resources and is not run live now.
 
 ## Not exercised live
 

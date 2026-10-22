@@ -1131,10 +1131,25 @@ mod profiles_create {
             ],
             "--name is required unless --config is supplied",
         );
-        assert_usage(
-            &create_profile(&["--direction", "response"]),
-            "Directional flag creation requires at least one protection or shared setting; use --config for an empty policy",
-        );
+        // D336: a directional flag create that fills no direction (no flag, or shared
+        // settings only) is refused before the tenant is read.
+        for shared in [
+            &[][..],
+            &["--max-inline-latency", "8"],
+            &["--inline-timeout-action", "allow"],
+            &["--mask-data-in-storage"],
+            &["--no-enable-full-conversation-inspection"],
+            &["--max-inline-latency", "8", "--no-mask-data-in-storage"],
+        ] {
+            let mut args = create_profile(&["--direction", "response"]);
+            args.extend_from_slice(shared);
+            assert_usage(
+                &args,
+                "Directional flag creation requires at least one protection flag, not only \
+                 shared settings: the service refuses a directional policy with no protection \
+                 in any direction",
+            );
+        }
         assert_usage(
             &create_profile(&["--direction", "sideways", "--prompt-injection", "block"]),
             "--direction must be prompt, response, tool-call, or tool-response",

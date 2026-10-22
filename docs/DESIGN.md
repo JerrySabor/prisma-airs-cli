@@ -4699,6 +4699,7 @@ raw scan read, §20.16 choice 77).
 | D333 | which refs `topics revert` counts as the topic's in its 8.0 reference checks | the in-scope check needs a ref with the first-listed revision's id and the name, the cross-direction check matches the name only: a ref pinned to another revision of the topic is "not assigned" | the §13.4 identity, as the surgery uses: a ref whose `topic_name` is the name or whose `topic_id` is the id of any listed revision with that name (§13.17) | the checks must see every ref the surgery removes (correctness) |
 | D334 | a profile answer (`profiles get`, `list`, the `create` and `update` answers, the reads of `topics apply\|revert`, `profiles backup`) whose newly modelled scm-sdk 0.2.4 fields hold an unexpected value: an explicit `null` or a wrong type for `dlp_tenant_id`, `content-type-mode`, `content-type-configurations`, a known direction or `enable-full-conversation-inspection` (8.0) | TS SDK 0.35.0's response schema refuses the whole read: `AISEC_RESPONSE_VALIDATION:Response did not match schema: …` (exit 1), nothing printed | the read succeeds (scm-sdk 0.2.4's tolerant response binding keeps the value in the model's extensions) and the value is printed and backed up as sent: `dlpTenantId` is the record's value (`null`, a number), the pretty `DLP tenant` line its compact JSON, the policy every key as sent; a flag update, `topics apply\|revert` or a restore that would send the value back fails the request schema before its write (the D116 text; exit 2 for `profiles update`, exit 1 for the topic commands and restore) (§13.17, §15.25) | a faithful read must not hide what the service stores (G25, D306), and the request schema still guards every write |
 | D335 | `profiles create --direction <d>` with flags: the directions it writes (8.0) | `content-type-configurations` holds only `<d>`; the live service refuses that body with HTTP 400 for every direction (B7, 2026-10-22) | `<d>` holds the flags' protections and the other three known directions (`prompt`, `response`, `tool-call`, `tool-response`) are written as empty objects; the rest of the body is TS's (§13.17) | the service requires all four direction keys in a directional entry (observed live; the body padded this way is accepted), so the TS body can never be created |
+| D336 | `profiles create --direction <d>` whose flags fill no direction: no policy flag, or shared settings only (`--max-inline-latency`, `--inline-timeout-action`, `--[no-]mask-data-in-storage`, `--[no-]enable-full-conversation-inspection`) (8.0) | refuses only the flagless create, with `Directional flag creation requires at least one protection or shared setting; use --config for an empty policy` (exit 2); a shared-only create is sent (`{<d>: {}}` and the shared settings), and the live service refuses it with HTTP 400 (B7) | the flagless and the shared-only create are both refused before OAuth (exit 2, no request) with `Directional flag creation requires at least one protection flag, not only shared settings: the service refuses a directional policy with no protection in any direction` (§13.12, §13.17) | the service refuses a directional policy whose four directions are all empty (observed live, B7, also with the shared settings set), so the request can only fail; and an empty policy through `--config`, which TS's text suggests, is refused too |
 
 ## 13. M4 runtime writes (0.4)
 
@@ -5198,8 +5199,9 @@ Argument checks (exit 2), in order (D102, D103; from 8.0 per §13.17):
 3. `--direction` (§13.17).
 4. Neither `--config` nor a protection flag:
    `Specify at least one policy flag (for example --prompt-injection block) or --config <path>`;
-   with `--direction`, `Directional flag creation requires at least one protection or
-   shared setting; use --config for an empty policy`.
+   with `--direction`, no flag that fills the direction (no flag, or shared settings only;
+   D336): `Directional flag creation requires at least one protection flag, not only shared
+   settings: the service refuses a directional policy with no protection in any direction`.
 5. `--max-inline-latency` (§13.1).
 6. `--dlp-profiles` or `--[no-]mask-data-inline` without `--dlp-action`:
    `--dlp-profiles and --[no-]mask-data-inline require --dlp-action when creating a profile`.
@@ -5427,15 +5429,18 @@ whose scenarios run on both CLIs in `tests/parity_runtime_directional.rs`. The R
 `redtail-prod`; `docs/research/live-directional-profiles.md`, MILESTONES 8.0): flag creation
 of each of the four directions (with D335), a `--config` create, a protection edit of each
 direction, a shared-settings edit, a topic applied and reverted in each direction, backup,
-delete, restore and `--on-conflict verify`. scm-sdk 0.2.4 still marks directional live
-acceptance unverified on its side. The live service applies rules the request schema does
-not express, which the CLI does not check before sending (a refusal is the service's HTTP
-400, exit 1): every directional entry needs all four direction keys (D335 builds them on a
+delete, restore and `--on-conflict verify`. Supported for profiles with a single AI entry.
+scm-sdk 0.2.4 still marks directional live acceptance unverified on its side. The live
+service applies rules the request schema does not express, which the CLI does not check
+before sending except D336 (a refusal is the service's HTTP 400, exit 1, with no response
+body shown): every directional entry needs all four direction keys (D335 builds them on a
 flag create; a `--config` body must hold them), a policy whose directions are all empty is
-refused, `response` refuses `prompt-injection`, and `toxic-content` takes `block` or `allow`
+refused (a flag create that would send one is refused locally, D336; a `--config` body is
+sent), `response` refuses `prompt-injection`, and `toxic-content` takes `block` or `allow`
 per level. Not exercised live: several AI entries (`--ai-profile-index`), DLP blocks inside a
 direction, and the runtime report's `Protection configurations` column; the offline contract
-below covers them.
+below covers them. Every write that changes a profile without a `dlp_tenant_id` (below)
+has an unknown effect on the stored DLP tenant binding.
 
 **The two layouts.** A policy holds AI entries (`ai-security-profiles[]`).
 - A **legacy** entry keeps its protections (`model-protection`, `app-protection`,
@@ -5488,10 +5493,16 @@ written:
   {}}}`, no section defaults, the malicious-code item named `malicious-code`. The three
   directions the flags do not fill are written as empty objects (D335: the live service
   refuses a directional entry without all four keys; TS 7.3.0 writes the selected direction
-  only), so a later flag edit of any direction finds it present. Without a protection or
-  shared-setting flag:
-  `Directional flag creation requires at least one protection or shared setting; use
-  --config for an empty policy`.
+  only), so a later flag edit of any direction finds it present. Without a flag that fills
+  the direction (no flag, or only the shared settings `--max-inline-latency`,
+  `--inline-timeout-action`, `--[no-]mask-data-in-storage` and
+  `--[no-]enable-full-conversation-inspection`), the create is refused before the tenant and
+  OAuth (exit 2, D336): `Directional flag creation requires at least one protection flag,
+  not only shared settings: the service refuses a directional policy with no protection in
+  any direction`. TS 7.3.0 refuses only the flagless create (`… requires at least one
+  protection or shared setting; use --config for an empty policy`) and sends a shared-only
+  one, which the service refuses; an empty policy through `--config` is refused by the
+  service too.
 - Without `--direction`, the legacy builder of §13.12 (`malicious-code-detection`, the
   section defaults).
 - Every body is validated before the tenant (below).
@@ -5602,10 +5613,16 @@ keeps (`Optional::Unset`, an explicit value, and an unexpected value in the exte
 - `dlp_tenant_id` is a string. A `--config` body sends it as written; a flag update sends
   TS 7.3.0's `{profile_name, active, policy}` and so no `dlp_tenant_id`; a restore never
   sends the source's (a tenant-bound identifier, TS's body); a backup keeps the record's.
-  Observed live (B7): no `get` or `list` answer carries `dlp_tenant_id`; a create or PUT
-  answer carries the value sent, and `"none"` when the body omits it, so a PUT that omits
-  it reports the stored value cleared (observed on flag updates; `topics apply|revert` send
-  no `dlp_tenant_id` either). The CLI prints each answer as sent;
+  So every CLI write that changes a profile leaves it out unless a `--config` file holds it:
+  a flag `profiles update`, `topics apply|revert`, a restore (create and overwrite) and a
+  `profiles update --config` whose file omits the key; TS 7.3.0 does the same, and no read
+  returns the field, so the CLI cannot carry it over. Observed live (B7): no `get` or `list`
+  answer carries `dlp_tenant_id`; a create or PUT answer carries the value sent, and
+  `"none"` when the body omits it. The answer reports `none`; the effect on the stored
+  binding is unknown (the evidence cannot tell a cleared binding from an answer that only
+  reflects the request; `docs/research/live-directional-profiles.md` records the open
+  question and the test that would decide it). This applies to legacy profiles too. The
+  CLI prints each answer as sent;
 - `content-type-mode` is free text (`per_content_type` is the one observed value); the four
   known directions are independently optional in the schema (the live service requires all
   four keys, D335) and an unknown direction key is kept with its value by every read,

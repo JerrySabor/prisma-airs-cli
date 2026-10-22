@@ -72,7 +72,7 @@ doctor checks, report titles and config keys.
 | 0.10 | M6e Gateway | done | `gateway` (renamed); `gateway report`; doctor "Gateway API" check |
 | 0.11 | M6f Supplychain | done | `supplychain` (renamed); `supplychain report`; G71 tolerant scan read |
 | 1.0 | Rename and distribution | done | Executable invoked as `airs` (product, crate and repo stay airs-cli), with an `airs-cli-rs` compatibility name; Homebrew tap. (The crate has been on crates.io as `airs-cli` since 0.3.1.) The contract is DESIGN §21 (D326; D73 extended): chunk 1 the rename across code, help, messages, tests and docs; chunk 2 distribution (release tarballs `airs-cli-<version>-<target>.tar.gz` with the compatibility link, the Homebrew formula built from the crates.io crate and its script, RELEASING, README install); scm-sdk `=0.2.3` with the same features (the red team management 0.86.0 update: D327–D329, D35 extended; DESIGN §15.24) |
-| 8.0 | The move and the TypeScript 7.3.0 port | in progress | Part A: the Rust CLI moves into `cdot/prisma-airs-cli` (the `airs-cli` name, npm, the docs site; DESIGN §21.15–§21.17). Part B (this port, DESIGN §13.17, §15.25): the reference moves to tag `v7.3.0` (TESTING §3.4); scm-sdk 0.2.4 (the TypeScript 0.35.0 overlay, `=0.2.4` from crates.io); directional security profiles on `profiles create\|update` and `topics apply\|revert`, the 7.3.0 merge, output and revert rules, the views, the runtime report and profile transfer; D332–D335 added, D117 retired, D26, D50, D93, D94, D96, D98–D103, D106, D115 and D116 reworded; the 0.2.4 gap closure (every profile read without response defaults, the restore's 0.35.0 re-check, the multi-page and cumulative 0.2.3 regressions; no §12 change), independently plan-reviewed and scored (below). Done offline (fmt, clippy, the full parity suite, the 1.89 check, `cargo audit`, `cargo deny check advisories sources`); the bounded live run per direction (B7, decision 10) passed against `redtail-prod` on 2026-10-22 after D335 (below); left: the adversarial review, then Part C (the 8.0.0 release on every channel) |
+| 8.0 | The move and the TypeScript 7.3.0 port | in progress | Part A: the Rust CLI moves into `cdot/prisma-airs-cli` (the `airs-cli` name, npm, the docs site; DESIGN §21.15–§21.17). Part B (this port, DESIGN §13.17, §15.25): the reference moves to tag `v7.3.0` (TESTING §3.4); scm-sdk 0.2.4 (the TypeScript 0.35.0 overlay, `=0.2.4` from crates.io); directional security profiles on `profiles create\|update` and `topics apply\|revert`, the 7.3.0 merge, output and revert rules, the views, the runtime report and profile transfer; D332–D336 added, D117 retired, D26, D50, D93, D94, D96, D98–D103, D106, D115 and D116 reworded; the 0.2.4 gap closure (every profile read without response defaults, the restore's 0.35.0 re-check, the multi-page and cumulative 0.2.3 regressions; no §12 change), independently plan-reviewed and scored (below). Done offline (fmt, clippy, the full parity suite, the 1.89 check, `cargo audit`, `cargo deny check advisories sources`); the bounded live run per direction (B7, decision 10) passed against `redtail-prod` on 2026-10-22 after D335 (below); the adversarial review's findings fixed offline, with D336 (below; awaiting its re-check); left: Part C (the 8.0.0 release on every channel) |
 
 ## Definition of done for a milestone
 
@@ -390,7 +390,7 @@ From 1.0 (DESIGN §21), each stable release is also done when:
   `d332_`–`d334_`), the `sdk_0_2_4` module of `tests/runtime_writes.rs`, the directional cases in
   `parity_runtime_writes`, `parity_runtime_topics`, `parity_runtime_report`, `parity_runtime_transfer` and
   `runtime_transfer`, and the `src/profile_policy.rs`, `src/policy.rs` and `src/views.rs` unit tests. The bounded
-  live run per direction (B7) is done (below, with D335); the adversarial review is not yet done.
+  live run per direction (B7) is done (below, with D335); the adversarial review's findings are fixed (below, with D336).
 - **8.0 the scm-sdk 0.2.4 gap closure.** A second, more detailed adoption brief was audited item by item against PR #5.
   Gaps closed (DESIGN §15.25 point 4 and "Cumulative migrations", §13.17, §7.5): every profile read (`list`, `list
   --all`, `get` and its walks, the update and delete lookups, the `topics apply|revert` profile reads, the `cleanup`
@@ -422,8 +422,26 @@ From 1.0 (DESIGN §21), each stable release is also done when:
   only its location), a topic applied and reverted per direction, backup, delete of every revision, restore
   (policy identical to the backup) and `--on-conflict verify`. Service rules recorded, not checked locally (a 400,
   exit 1): all-empty directions refused, `prompt-injection` refused in `response`, `toxic-content` levels `block`
-  or `allow` only. `dlp_tenant_id`: no `get` or `list` answer carries it; a write answer echoes the value sent, or
-  `"none"` when the body omits it, so a PUT that omits it reports it cleared (observed on flag updates; topic writes send the same fields).
+  or `allow` only (the toxic `alert` refusal seen once). `dlp_tenant_id`: no `get` or `list` answer carries it; a write
+  answer echoes the value sent, or `"none"` when the body omits it. The answer reports `none`; the effect on the stored
+  binding is unknown (an open question for the service owner, with the distinguishing test, in the evidence file).
   Not exercised live: several AI entries, DLP blocks inside a direction, the report column. Cleanup: 61 deletes
   (57 profile revisions, 4 topics); the final listings equal the preflight's (35 profile revisions, 5 topics, zero
   `airs-rs-` resources). Directional profiles are no longer marked experimental.
+  **Live test rules.** The maintainer's release brief set the `airs-rs-live-` prefix and authorised B7. The departures
+  from the rules above: the `live_cleanup` sweeper does not recognise that prefix; 11 named resources against the cap
+  of 10, plus about 57 profile revisions; no `target/live/ledger.jsonl` ledger (a step log outside the repository).
+  The maintainer waived them for B7, given that the final listing matched the preflight's.
+  **Follow-up (open):** a Rust-only directional step in `live_write_flow` (`tests/live.rs`, recorded under D93), so a
+  later run repeats B7 within the live tier's prefix, ledger and cap. Not implemented; it must not run live before
+  it is reviewed.
+- **8.0 the adversarial review of PR #5 (at `24be812`).** Findings fixed offline: the `dlp_tenant_id` claim on writes
+  reworded to "the answer reports `none`; the effect on the stored binding is unknown" (DESIGN §13.17, the evidence
+  file) and disclosed as a known limitation for every write path (README, the docs site, MIGRATION, CHANGELOG); the
+  docs' `toxic-content … alert` examples on directional profiles replaced with `block`/`allow`; **D336**: a
+  directional flag create whose flags fill no direction (none, or shared settings only) is refused before OAuth
+  (exit 2) with a text naming the service rule (test-first: `d336_a_directional_flag_create_without_a_protection_is_refused`,
+  `src/policy.rs::tests::only_protection_flags_fill_a_direction`, the `runtime_writes` usage test); one known-limitations
+  list across README, the docs site, CHANGELOG and MIGRATION (directional profiles supported, for single-entry
+  profiles); the `DLP tenant` line hedged; the B7 live-rule departures and their waiver recorded (above); the parity
+  test renamed to `an_empty_directional_flag_creation_is_refused`, the D335 test checking the method and path.
