@@ -39,6 +39,15 @@ file records the changes to the repository itself.
   explicit `null`, a wrong type) is printed and backed up as sent (D334); every new
   request field is checked before the tenant; omitted settings stay omitted and an explicit
   `false` stays `false`.
+- **Response defaults on every profile read** (no output change, DESIGN §15.25): `profiles
+  list|get`, the `--all` and lookup walks, `profiles update|delete` lookups, the `topics
+  apply|revert` profile reads, `profiles cleanup` and the `profiles create|update` and topic
+  PUT answers are validated without the SDK's response defaults, like the backup, restore
+  and report already were; a restore re-checks each mapped body with the 0.35.0 request
+  root. New regressions pin multi-page lossless reads and backups, the update's debug
+  operation names, `targets error-logs --skip` as a usage error, the 0.2.3 profiling
+  statuses, closed target unions, the `api.apps` endpoint defaults and `serde_json`
+  without `preserve_order`.
 - **Directional security profiles** (experimental, DESIGN §13.17): `--direction` and
   `--ai-profile-index` on `runtime profiles create|update` and `runtime topics
   apply|revert`; `--[no-]enable-full-conversation-inspection`, `--no-mask-data-inline`,

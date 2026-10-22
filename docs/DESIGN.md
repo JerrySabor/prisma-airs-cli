@@ -1700,9 +1700,11 @@ already printed the banner, D57).
 ### 7.5 JSON shapes (bare array for lists, bare object for gets)
 
 Profile: `{profileId, profileName, revision, active, createdBy, updatedBy,
-lastModifiedTs, policy}` in that order, unset fields omitted, `csp_id`, `tsg_id` and
+lastModifiedTs, policy, dlpTenantId}` in that order (`dlpTenantId` from 8.0, only when the
+record carries `dlp_tenant_id`, §13.17), unset fields omitted, `csp_id`, `tsg_id` and
 unknown top-level fields dropped; `policy` is the SDK `Policy` model serialised
-(schema-ordered known keys, then unknown keys sorted).
+(schema-ordered known keys, then unknown keys sorted; extensions included). Every profile
+read is validated without the SDK's response defaults (§15.25 point 4).
 
 Topic: `{topicId, topicName, revision, active, description, examples, createdBy,
 updatedBy, lastModifiedTs, createdTs}`; `examples` is always present (`[]` when
@@ -5519,7 +5521,9 @@ update file's request before the lookup, the id when the argument is one), after
 for a merged update body. `topics apply|revert` validate their PUT with the same root and
 keep exit 1 (TS reports their schema failure as an operational error). The transfer
 commands validate with the same roots (`valid_profile_body`, the Basic fallback's
-`typescript:0.35.0:PolicySchema`).
+`typescript:0.35.0:PolicySchema`), and a restore checks each mapped body again with the
+request root just before its write (`policy::request_body`; a mismatch is the stop text,
+nothing sent), never with the model's 0.34.0 `parse`.
 
 **Output** (TS 7.3.0 `emitDetail`). `profiles create|update` print the status line
 `  Profile created|updated: <id>` (dim, stderr, quiet-suppressed; D106) and the response:
@@ -8499,10 +8503,37 @@ ran again on it.
    binding in both response modes: unknown fields, directions and modes and invalid values
    of the new fields survive in extensions (D334).
 4. **Response defaults (G10).** No schema reachable from a profile carries a default except
-   the list's `ai_profiles: []` (also through the versioned alias `s_ts035_s009653`), which
-   prints nothing; the backup walk reads every page with `without_response_defaults()`
-   (§18.15), so a backed-up record never gains a key. G25 is unchanged: response ids,
-   timestamps, unknown enum strings and object keys stay accepted.
+   the list's `ai_profiles: []` (also through the versioned alias `s_ts035_s009653`; the
+   graph walked from `SecurityProfileSchema`, `PolicySchema`, `AiSecurityProfileSchema`,
+   `ModelConfigurationSchema`, `CreateSecurityProfileRequestSchema` and their
+   `typescript:0.35.0:` roots reaches no other `ZodDefault`), and an absent list already
+   reads as empty, so nothing printed depends on it. Still, from the 0.2.4 gap closure
+   **every profile read** runs without the defaults, on every page: `profiles list` (one
+   page: `runtime::options`, the 60 s budget `None` gave), `list --all`, `get` and its
+   walks (`get_by_name`, `--all-versions`), the `profiles update|delete` lookups, the
+   profile read of `topics apply|revert` and the `profiles cleanup` listings
+   (`commands::profile_walk_options`: the one 300 s deadline of the token and the walk,
+   as before), plus the backup (§18.15), restore (§18.16) and report (§18.13) reads that
+   already did. Every profile write whose answer is printed or kept (`profiles
+   create|update`, the `topics apply|revert` PUTs, the restore's writes) builds per attempt
+   `runtime::request_options(SINGLE_REQUEST_BUDGET)` (no defaults, the same 60 s; one
+   attempt and the single 401 replay unchanged, D95). Excluded with reason: the profile
+   and topic deletes (their answers are neither printed nor kept), the topic walks (their
+   `examples: []` default is TypeScript's output, G27) and the DLP reads (no default is
+   reachable, §16 "G10 does not apply"). The evidence is
+   `src/commands/mod.rs::tests::profile_reads_and_writes_skip_the_response_defaults` (the
+   options, and the SDK half: the option keeps an absent `ai_profiles` absent and a
+   directional record reads identically in both modes) and the multi-page tests
+   `tests/management.rs::sdk_0_2_4_pages` and
+   `tests/runtime_transfer.rs::backup::directional_records_are_stored_losslessly_on_every_page`.
+   **Faithful output.** `profiles backup` is the lossless path: it stores each record as
+   the page carried it (unknown top-level keys, `csp_id`, `tsg_id`, explicit `null`s
+   included). The `get`, `list`, `create` and `update` JSON stays the §7.5 projection,
+   TypeScript's output: its `policy` is the complete SDK model with its extensions and
+   `dlpTenantId` falls back to the extension value (D334), but unknown top-level keys are
+   dropped there by contract. G25 is unchanged: response ids, timestamps, unknown enum
+   strings and object keys stay accepted, and the CLI adds no UUID or date check of a
+   response document.
 5. **Dependencies.** 0.2.4 adds no dependency and changes no feature or MSRV (1.89). Before
    the swap, following the SDK's RUSTSEC-2026-0382/0383 advisory for downstream lockfiles,
    `Cargo.lock` moved `rustls-webpki` 0.103.15 → 0.103.16 and `webpki-root-certs` 1.0.5 →
@@ -8547,7 +8578,28 @@ format by hand (`DirectTransport` hands the SDK raw body chunks; `model-security
 realtime values, the client-session config, the basic-auth and audio fields, with their
 unknown-value fallbacks; `profiling_status` is reconciled without a flag, choice 4);
 `targets error-logs --offset` and `--search` stay usage errors before the tenant (D300).
-0.2.4 adds nothing to reconcile there.
+0.2.4 adds nothing to reconcile there. Pinned by the 0.2.4 gap closure:
+- `profiling_status`: the CLI sends no profiling or status filter, so nothing is
+  translated; answers carrying `NOT_STARTED`, `IN_PROGRESS`, `COMPLETED`, `FAILED` or an
+  unknown value are read by `targets list|get|backup`, and no view or backup prints the
+  field (the TS projections, §15.18)
+  (`tests/redteam_reads.rs::management_0_86::every_profiling_status_is_read_and_never_sent`,
+  `tests/redteam_reports.rs::management_0_86::profiling_statuses_are_accepted_and_unknown_unions_fail_the_row`).
+- The 0.86.0 unions are closed in the response schema on both SDKs: a `multi_turn_config`
+  type or a `target_connection_config` shape that is no known branch fails the read (D38
+  text, exit 1; a failed row in a backup), as TypeScript does; scm-sdk's typed `Unknown`
+  fallback applies only to documents the schema accepts. The CLI keeps that check (the
+  brief's retained required-field and type checks) and opens no gap: a future vendor branch
+  needs an SDK release (`tests/parity_redteam_reads.rs::parity::unknown_union_shapes_are_refused_like_typescript`,
+  `tests/redteam_reads.rs::management_0_86::unknown_union_shapes_fail_the_response_schema`).
+- `targets error-logs --skip` (the API name) is no flag: clap's usage error (exit 2, D1)
+  before the tenant (`tests/redteam_reads.rs::contract::an_error_log_skip_is_a_usage_error_before_the_tenant`).
+- The `api.apps` defaults stay and no endpoint is rewritten: the CLI's red team and
+  management defaults equal scm-sdk's, and a tenant's `api.sase` endpoint is used as
+  written (`src/clients.rs::tests::red_team_endpoints_are_the_defaults_or_the_tenant_values_unchanged`).
+- `serde_json` is built without `preserve_order` (`cargo tree -e features -i serde_json`:
+  `default`, `raw_value`, `std`), guarded by
+  `src/json.rs::tests::serde_json_is_built_without_preserve_order`.
 
 ## 16. M6b DLP (0.7)
 
