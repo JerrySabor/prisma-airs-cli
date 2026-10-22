@@ -5,12 +5,23 @@ sidebar_position: 4
 
 # Directional security profiles
 
-:::caution Experimental
-Directional profiles follow the TypeScript CLI 7.3.0 and `scm-sdk` 0.2.4. Neither has been
-accepted against a live tenant yet: the behaviour below is fully tested offline, against the
-TypeScript reference and a loopback service, but the service's own handling of every
-direction is unverified.
+:::note Live acceptance
+Directional profiles follow the TypeScript CLI 7.3.0 and `scm-sdk` 0.2.4. A live run against
+a tenant (2026-10-22) accepted flag and `--config` creates, a protection edit of each
+direction, shared-settings edits, a topic applied and reverted in each direction, and backup
+and restore. Not yet exercised live: profiles with several AI entries (`--ai-profile-index`)
+and DLP blocks inside a direction.
 :::
+
+The service applies rules of its own; a write that breaks one fails with HTTP 400 (exit 1),
+and nothing is written:
+
+- A directional entry must hold all four direction keys. A flag create writes the directions
+  it does not fill as empty objects (`{}`); a `--config` body must list all four.
+- A policy whose directions are all empty is refused.
+- The `response` direction refuses `prompt-injection`.
+- `toxic-content` takes `block` or `allow` for each level (`high:block, moderate:allow`), not
+  `alert`.
 
 A security profile's policy holds AI entries (`ai-security-profiles`). Two layouts exist:
 
@@ -20,7 +31,8 @@ A security profile's policy holds AI entries (`ai-security-profiles`). Two layou
 - A **directional** entry has `content-type-mode: per_content_type` (or a
   `content-type-configurations` key). Its protections live per direction in
   `content-type-configurations`, under `prompt`, `response`, `tool-call` and
-  `tool-response`; each direction is optional. Its `model-configuration` keeps only the
+  `tool-response`; the service requires all four keys, though a direction may be empty. Its
+  `model-configuration` keeps only the
   shared settings: `latency`, `mask-data-in-storage` and
   `enable-full-conversation-inspection`.
 
@@ -38,8 +50,11 @@ airs runtime profiles create --name Directional --direction response \
 airs runtime profiles create --config ./directional.json --output json
 ```
 
-Directional flag creation needs at least one protection or shared setting; use `--config`
-for a deliberately empty layout. A DLP block needs `--dlp-action` on a create.
+Directional flag creation needs at least one protection or shared setting, and the service
+also refuses a profile whose four directions are all empty, so give at least one protection.
+The flags fill the `--direction` you name; the other three directions are written empty, so
+a later `update --direction` can fill any of them. A DLP block needs `--dlp-action` on a
+create.
 
 ## Updating
 

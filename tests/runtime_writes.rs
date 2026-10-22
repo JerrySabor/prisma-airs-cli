@@ -1282,7 +1282,8 @@ mod profiles_create {
         }
     }
 
-    /// 8.0: a directional flag body (§13.17), and the DLP tenant line of the answer.
+    /// 8.0: a directional flag body (§13.17; the other three directions written empty,
+    /// D335), and the protection locations of the answer.
     #[test]
     fn a_direction_creates_one_directional_entry() {
         let fx = world();
@@ -1300,14 +1301,21 @@ mod profiles_create {
                 "model-type": "default",
                 "content-type-mode": "per_content_type",
                 "model-configuration": {"mask-data-in-storage": true},
-                "content-type-configurations": {"tool-response": {
-                    "agent-protection": [{"name": "agent-security", "action": "block"}]
-                }}
+                "content-type-configurations": {
+                    "prompt": {},
+                    "response": {},
+                    "tool-call": {},
+                    "tool-response": {
+                        "agent-protection": [{"name": "agent-security", "action": "block"}]
+                    }
+                }
             }]})
         );
         assert!(
-            out.stdout
-                .contains("  Protection locations  AI[0] default / tool-response\n"),
+            out.stdout.contains(
+                "  Protection locations  AI[0] default / prompt, AI[0] default / response, \
+                 AI[0] default / tool-call, AI[0] default / tool-response\n"
+            ),
             "{}",
             out.stdout
         );

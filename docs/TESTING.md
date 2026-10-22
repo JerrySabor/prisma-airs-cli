@@ -1479,6 +1479,18 @@ re-read only) plan the answers per run with `push_once` on `Sc::Scans`; each che
 re-read the same pair again, and the report reads 10 scans per page (two pages of `recent_scans`, one of the null
 rows), so a new scenario counts its pushes the same way and asserts the total of `sc_requests(Sc::Scans)`.
 
+### 6.10d The 8.0 directional run (B7)
+
+Directional profiles (DESIGN §13.17) have no `tests/live.rs` flow. TypeScript 7.3.0's flag
+create sends a body the service refuses (D335), so a two-CLI comparison of the writes cannot
+pass. They were accepted once, by an authorised manual run of the Rust release binary against
+`redtail-prod` (2026-10-22). Its step table, the probes that found D335, the service rules and
+the `dlp_tenant_id` observation are in
+[research/live-directional-profiles.md](research/live-directional-profiles.md). To repeat it,
+follow the steps there: name every resource with a fresh run-id prefix, read each write back
+with `runtime profiles get --output json`, delete every revision of every created profile by
+id, and compare the final listings with the preflight's.
+
 ### 6.11 What only a live run can show
 
 These were not verifiable on loopback and need your first live run:

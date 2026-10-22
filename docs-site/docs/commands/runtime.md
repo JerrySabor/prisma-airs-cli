@@ -78,7 +78,7 @@ airs runtime topics revert --profile prod-guard --name "Financial Advice"       
   and topic lists), keeps the DLP profiles when only `--dlp-action` changes, writes an
   explicit `false` for the `--no-…` flags, and refuses an update with nothing to change.
   `topics create` and `profiles update` act on the highest revision of a name.
-- **Directional profiles** (8.0, experimental) keep their protections per direction; see
+- **Directional profiles** (8.0) keep their protections per direction; see
   [Directional profiles](./runtime-directional-profiles.md) for `--direction`,
   `--ai-profile-index` and the layout rules.
 - **Confirmations** (`delete` without `--force`) need stdin and stderr to be

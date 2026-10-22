@@ -660,43 +660,13 @@ mod parity {
         assert_eq!(usage_line(&rust.run.stderr), usage_line(&ts.run.stderr));
     }
 
-    /// Flag creation of one direction (TS `buildProfileRequest` with `--direction`).
+    /// Flag creation of one direction (TS `buildProfileRequest` with `--direction`): an
+    /// empty one is refused alike on both CLIs.
     #[test]
     fn flag_creation_of_one_direction() {
-        let args = profiles(&[
-            "create",
-            "--name",
-            "Directional",
-            "--direction",
-            "tool-call",
-            "--prompt-injection",
-            "block",
-            "--malicious-code",
-            "block",
-            "--no-enable-full-conversation-inspection",
-            "--max-inline-latency",
-            "8",
-            "--output",
-            "json",
-        ]);
-        let Some((rust, ts)) = both("directional_flag_create", &directional(), &refs(&args)) else {
-            return;
-        };
-        assert_same_writes(&rust, &ts);
-        rust.run.assert_success();
-        assert_eq!(
-            rust.body()["policy"],
-            json!({"ai-security-profiles": [{
-                "model-type": "default",
-                "content-type-mode": "per_content_type",
-                "model-configuration": {"enable-full-conversation-inspection": false,
-                    "latency": {"max-inline-latency": 8}},
-                "content-type-configurations": {"tool-call": {
-                    "model-protection": [{"name": "prompt-injection", "action": "block"}],
-                    "app-protection": {"malicious-code-protection": {"name": "malicious-code", "action": "block"}}
-                }}
-            }]})
-        );
+        // The body of a one-direction create differs by D335 (the other three directions
+        // written empty), pinned on both sides by
+        // `divergence::d335_flag_creation_writes_every_known_direction`.
         let args = profiles(&["create", "--name", "Empty", "--direction", "response"]);
         let Some((rust, ts)) = both(
             "directional_flag_create_empty",
@@ -1024,6 +994,67 @@ mod divergence {
             );
             assert!(ts.run.stdout.is_empty(), "{name}");
         }
+    }
+
+    /// D335: a directional flag create fills the selected direction and writes the other
+    /// three known directions as empty objects; TypeScript 7.3.0 writes the selected
+    /// direction only, a body the live service refuses with HTTP 400 (MILESTONES 8.0, B7).
+    /// Everything else in the body is the same on both sides.
+    #[test]
+    fn d335_flag_creation_writes_every_known_direction() {
+        let args = profiles(&[
+            "create",
+            "--name",
+            "Directional",
+            "--direction",
+            "tool-call",
+            "--prompt-injection",
+            "block",
+            "--malicious-code",
+            "block",
+            "--no-enable-full-conversation-inspection",
+            "--max-inline-latency",
+            "8",
+            "--output",
+            "json",
+        ]);
+        let Some((rust, ts)) = both("d335", &directional(), &refs(&args)) else {
+            return;
+        };
+        rust.run.assert_success();
+        ts.run.assert_success();
+        assert_eq!(rust.writes().len(), 1);
+        assert_eq!(ts.writes().len(), 1);
+        let selected = json!({
+            "model-protection": [{"name": "prompt-injection", "action": "block"}],
+            "app-protection": {"malicious-code-protection": {"name": "malicious-code", "action": "block"}}
+        });
+        let shared = json!({"enable-full-conversation-inspection": false,
+            "latency": {"max-inline-latency": 8}});
+        let entry = |configurations: Value| {
+            json!({"ai-security-profiles": [{
+                "model-type": "default",
+                "content-type-mode": "per_content_type",
+                "model-configuration": shared.clone(),
+                "content-type-configurations": configurations
+            }]})
+        };
+        assert_eq!(
+            rust.body()["policy"],
+            entry(
+                json!({"prompt": {}, "response": {}, "tool-call": selected.clone(), "tool-response": {}})
+            )
+        );
+        assert_eq!(
+            ts.body()["policy"],
+            entry(json!({"tool-call": selected})),
+            "TypeScript writes the selected direction only"
+        );
+        let mut rust_rest = rust.body();
+        let mut ts_rest = ts.body();
+        rust_rest.as_object_mut().unwrap().remove("policy");
+        ts_rest.as_object_mut().unwrap().remove("policy");
+        assert_eq!(rust_rest, ts_rest, "the rest of the body is the same");
     }
 }
 

@@ -350,18 +350,25 @@ fn model_configuration(flags: &Flags, directional: bool) -> Map<String, Value> {
 /// - Without `direction`: one legacy entry, with TypeScript's defaults for the sections
 ///   the flags left out.
 /// - With `direction`: one directional entry (`content-type-mode: per_content_type`)
-///   holding the protections under that direction and the shared settings in
+///   holding the protections under that direction, the other three known directions as
+///   empty objects (D335: the service refuses a directional entry that lacks one; TS
+///   7.3.0 writes the selected direction only), and the shared settings in
 ///   `model-configuration`; no defaults are added.
 pub fn create_request(name: &str, active: bool, flags: &Flags, direction: Option<&str>) -> Value {
     let entry = match direction {
         Some(direction) => {
             let mut config = model_configuration(flags, true);
             let shared = layout::extract_shared(&mut config);
+            let mut directions: Map<String, Value> = layout::DIRECTIONS
+                .iter()
+                .map(|known| ((*known).to_owned(), json!({})))
+                .collect();
+            directions.insert(direction.to_owned(), Value::Object(config));
             json!({
                 "model-type": "default",
                 "content-type-mode": layout::PER_CONTENT_TYPE,
                 "model-configuration": Value::Object(shared),
-                "content-type-configurations": {direction: Value::Object(config)},
+                "content-type-configurations": Value::Object(directions),
             })
         }
         None => {
@@ -1053,8 +1060,10 @@ mod tests {
         );
     }
 
+    /// D335: the flags fill the selected direction and the other three known directions
+    /// are written empty (the service refuses a directional entry without all four).
     #[test]
-    fn directional_create_holds_only_the_direction_and_shared_settings() {
+    fn directional_create_fills_one_direction_and_writes_the_others_empty() {
         let request = create_request(
             "Directional",
             true,
@@ -1071,12 +1080,15 @@ mod tests {
                 "content-type-mode": "per_content_type",
                 "model-configuration": {"enable-full-conversation-inspection": false},
                 "content-type-configurations": {
-                    "tool-call": {"model-protection": [{"name": "prompt-injection", "action": "block"}]}
+                    "prompt": {},
+                    "response": {},
+                    "tool-call": {"model-protection": [{"name": "prompt-injection", "action": "block"}]},
+                    "tool-response": {}
                 }
             })
         );
         assert!(request_body(request).is_some());
-        // Each of the four directions under its exact wire key, and only that one (the
+        // Each of the four directions under its exact wire key, the others empty (the
         // shared settings an empty `model-configuration`, as TS 7.3.0 builds it).
         for direction in ["prompt", "response", "tool-call", "tool-response"] {
             let request = create_request(
@@ -1086,9 +1098,12 @@ mod tests {
                 Some(direction),
             );
             let entry = &request["policy"]["ai-security-profiles"][0];
+            let mut expected =
+                json!({"prompt": {}, "response": {}, "tool-call": {}, "tool-response": {}});
+            expected[direction] =
+                json!({"model-protection": [{"name": "prompt-injection", "action": "alert"}]});
             assert_eq!(
-                entry["content-type-configurations"],
-                json!({direction: {"model-protection": [{"name": "prompt-injection", "action": "alert"}]}}),
+                entry["content-type-configurations"], expected,
                 "{direction}"
             );
             assert_eq!(entry["model-configuration"], json!({}), "{direction}");

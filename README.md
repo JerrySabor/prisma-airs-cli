@@ -29,8 +29,8 @@ in from `cdot/prisma-airs-cli-rs` (at `a9d7864`) and replaces it. The tree is st
 1.0.0. The next release is **8.0.0**, the first from this repository and one version on
 every channel (crates.io, npm, Homebrew, the Forgejo release and the docs site): it adds
 the `airs-cli` name and the npm channel described below, and ports the TypeScript CLI
-7.3.0 changes (directional runtime security profiles, experimental, see
-[Directional profiles](#directional-profiles-80-experimental)) on `scm-sdk` 0.2.4, the
+7.3.0 changes (directional runtime security profiles, accepted against a live tenant, see
+[Directional profiles](#directional-profiles-80)) on `scm-sdk` 0.2.4, the
 TypeScript SDK 0.35.0 overlay (`=0.2.4` from crates.io, DESIGN §15.25). There is no 1.0.1
 or 1.1.0 release.
 
@@ -387,13 +387,21 @@ airs runtime topics revert --profile prod-guard --name "Financial Advice"       
   no data. The TypeScript CLI's hidden `--format` still works on `topics create`,
   `apply`, `revert` and `eval`, with its deprecation warning.
 
-### Directional profiles (8.0, experimental)
+### Directional profiles (8.0)
 
 A directional profile keeps its protections per direction (`prompt`, `response`,
 `tool-call`, `tool-response`) under `content-type-configurations`, and its shared settings
 (latency, storage masking, conversation inspection) in `model-configuration`. Legacy
-profiles need no migration. This follows the TypeScript CLI 7.3.0 and `scm-sdk` 0.2.4;
-neither has been accepted against a live tenant yet, so treat it as experimental.
+profiles need no migration. This follows the TypeScript CLI 7.3.0 and `scm-sdk` 0.2.4. A
+live run (2026-10-22) accepted creates, edits of each direction and of the shared settings,
+topics in each direction, and backup and restore.
+
+The service requires all four direction keys in a directional profile. A flag create
+therefore writes the three directions it does not fill as empty objects (the TypeScript CLI
+writes only one, which the service refuses), and a `--config` body must hold all four. The
+service also refuses `prompt-injection` in the `response` direction, a policy whose
+directions are all empty, and `toxic-content` levels other than `block` and `allow`; these
+refusals are HTTP 400 errors (exit 1).
 
 ```sh
 airs runtime profiles create --name Directional --direction response \

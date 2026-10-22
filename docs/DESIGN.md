@@ -4698,6 +4698,7 @@ raw scan read, §20.16 choice 77).
 | D332 | `--ai-profile-index <n>` (`profiles update`, `topics apply|revert`, 8.0) | `Number(value)`: `0x0`, `1e0`, `" 1"` and an empty value are indexes | decimal digits only (at most 2^53 − 1), else `--ai-profile-index must be a nonnegative integer` (exit 2, before the tenant) (§13.17) | strict parsing (D17) |
 | D333 | which refs `topics revert` counts as the topic's in its 8.0 reference checks | the in-scope check needs a ref with the first-listed revision's id and the name, the cross-direction check matches the name only: a ref pinned to another revision of the topic is "not assigned" | the §13.4 identity, as the surgery uses: a ref whose `topic_name` is the name or whose `topic_id` is the id of any listed revision with that name (§13.17) | the checks must see every ref the surgery removes (correctness) |
 | D334 | a profile answer (`profiles get`, `list`, the `create` and `update` answers, the reads of `topics apply\|revert`, `profiles backup`) whose newly modelled scm-sdk 0.2.4 fields hold an unexpected value: an explicit `null` or a wrong type for `dlp_tenant_id`, `content-type-mode`, `content-type-configurations`, a known direction or `enable-full-conversation-inspection` (8.0) | TS SDK 0.35.0's response schema refuses the whole read: `AISEC_RESPONSE_VALIDATION:Response did not match schema: …` (exit 1), nothing printed | the read succeeds (scm-sdk 0.2.4's tolerant response binding keeps the value in the model's extensions) and the value is printed and backed up as sent: `dlpTenantId` is the record's value (`null`, a number), the pretty `DLP tenant` line its compact JSON, the policy every key as sent; a flag update, `topics apply\|revert` or a restore that would send the value back fails the request schema before its write (the D116 text; exit 2 for `profiles update`, exit 1 for the topic commands and restore) (§13.17, §15.25) | a faithful read must not hide what the service stores (G25, D306), and the request schema still guards every write |
+| D335 | `profiles create --direction <d>` with flags: the directions it writes (8.0) | `content-type-configurations` holds only `<d>`; the live service refuses that body with HTTP 400 for every direction (B7, 2026-10-22) | `<d>` holds the flags' protections and the other three known directions (`prompt`, `response`, `tool-call`, `tool-response`) are written as empty objects; the rest of the body is TS's (§13.17) | the service requires all four direction keys in a directional entry (observed live; the body padded this way is accepted), so the TS body can never be created |
 
 ## 13. M4 runtime writes (0.4)
 
@@ -5422,9 +5423,19 @@ its `docs-site/docs/cli/runtime/profiles.md`, `src/airs/profile-policy.ts`,
 and `topics-revert.ts`, and its `tests/integration/directional-security-profiles.spec.ts`,
 whose scenarios run on both CLIs in `tests/parity_runtime_directional.rs`. The Rust form is
 `src/profile_policy.rs` (layout rules, selector, recursive merge) and `src/policy.rs`
-(builders, merge, topic surgery). **Status: experimental.** scm-sdk 0.2.4 marks directional
-live acceptance as unverified, and this CLI has no live result yet (MILESTONES 8.0); the
-offline contract below is fully tested.
+(builders, merge, topic surgery). **Status: accepted live** (8.0 B7, 2026-10-22, against
+`redtail-prod`; `docs/research/live-directional-profiles.md`, MILESTONES 8.0): flag creation
+of each of the four directions (with D335), a `--config` create, a protection edit of each
+direction, a shared-settings edit, a topic applied and reverted in each direction, backup,
+delete, restore and `--on-conflict verify`. scm-sdk 0.2.4 still marks directional live
+acceptance unverified on its side. The live service applies rules the request schema does
+not express, which the CLI does not check before sending (a refusal is the service's HTTP
+400, exit 1): every directional entry needs all four direction keys (D335 builds them on a
+flag create; a `--config` body must hold them), a policy whose directions are all empty is
+refused, `response` refuses `prompt-injection`, and `toxic-content` takes `block` or `allow`
+per level. Not exercised live: several AI entries (`--ai-profile-index`), DLP blocks inside a
+direction, and the runtime report's `Protection configurations` column; the offline contract
+below covers them.
 
 **The two layouts.** A policy holds AI entries (`ai-security-profiles[]`).
 - A **legacy** entry keeps its protections (`model-protection`, `app-protection`,
@@ -5473,8 +5484,12 @@ written:
   combined with profile write flags or selectors`, TS 7.3.0's text; D103).
 - With `--direction`, the flags build one directional entry: `{"model-type": "default",
   "content-type-mode": "per_content_type", "model-configuration": <shared settings>,
-  "content-type-configurations": {<direction>: <protections>}}`, no section defaults, the
-  malicious-code item named `malicious-code`. Without a protection or shared-setting flag:
+  "content-type-configurations": {<direction>: <protections>, <each other known direction>:
+  {}}}`, no section defaults, the malicious-code item named `malicious-code`. The three
+  directions the flags do not fill are written as empty objects (D335: the live service
+  refuses a directional entry without all four keys; TS 7.3.0 writes the selected direction
+  only), so a later flag edit of any direction finds it present. Without a protection or
+  shared-setting flag:
   `Directional flag creation requires at least one protection or shared setting; use
   --config for an empty policy`.
 - Without `--direction`, the legacy builder of §13.12 (`malicious-code-detection`, the
@@ -5586,10 +5601,16 @@ keeps (`Optional::Unset`, an explicit value, and an unexpected value in the exte
   an explicit `false` is written and kept (`Optional::Value(false)`);
 - `dlp_tenant_id` is a string. A `--config` body sends it as written; a flag update sends
   TS 7.3.0's `{profile_name, active, policy}` and so no `dlp_tenant_id`; a restore never
-  sends the source's (a tenant-bound identifier, TS's body); a backup keeps the record's;
+  sends the source's (a tenant-bound identifier, TS's body); a backup keeps the record's.
+  Observed live (B7): no `get` or `list` answer carries `dlp_tenant_id`; a create or PUT
+  answer carries the value sent, and `"none"` when the body omits it, so a PUT that omits
+  it reports the stored value cleared (observed on flag updates; `topics apply|revert` send
+  no `dlp_tenant_id` either). The CLI prints each answer as sent;
 - `content-type-mode` is free text (`per_content_type` is the one observed value); the four
-  known directions are independently optional and an unknown direction key is kept with
-  its value by every read, merge, backup and restore; no direction is synthesized;
+  known directions are independently optional in the schema (the live service requires all
+  four keys, D335) and an unknown direction key is kept with its value by every read,
+  merge, backup and restore; no read, merge, backup or restore synthesizes a direction (a
+  flag create writes the three it does not fill as empty objects, D335);
 - an answer holding an unexpected value of a new field is printed and backed up as sent,
   and a write that would send it back fails the request schema (D334).
 
@@ -8554,9 +8575,11 @@ ran again on it.
    `serde_json/preserve_order`. Against the SDK's own qualified `Cargo.lock`, the CLI
    resolves every shared package at the same version except `schannel` (Windows only,
    0.1.30 here, 0.1.29 there).
-6. **Status.** The SDK marks directional live acceptance unverified; so does this CLI
-   (§13.17, MILESTONES 8.0). Offline loopback tests do not show that a tenant applies
-   these settings.
+6. **Status.** The SDK marks directional live acceptance unverified. This CLI's B7 live run
+   (2026-10-22, `redtail-prod`) accepted every directional create, edit, topic, backup and
+   restore operation on all four directions once the flag create wrote all four direction
+   keys (D335); the service rules it found are listed in §13.17 and
+   `docs/research/live-directional-profiles.md`.
 
 **Workarounds, decided on 0.2.4** (both kept; neither is an SDK change):
 - **The 0.35.0 request root.** 0.2.4's documentation (`DIRECTIONAL_PROFILES.md`,
