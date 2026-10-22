@@ -16960,7 +16960,9 @@ versions of the same package).
   child's code, or re-raises the child's terminating signal after removing its own handlers (128 + n if it
   survives). It forwards SIGTERM and SIGHUP always, and SIGINT and SIGQUIT only when none of stdin, stdout and stderr
   is a terminal: a terminal already delivers Ctrl-C and Ctrl-\ to the whole foreground process group, and a second
-  SIGINT makes `airs` exit at once (§2.5). The binary never sees the launcher's `argv[0]` and prints `airs` whatever
+  SIGINT makes `airs` exit at once (§2.5). The handlers are installed before the spawn, and a signal that arrives
+  during it is sent once the child exists: on Linux the binary can run before `spawn` returns, and an unhandled
+  signal there would kill the launcher and orphan the binary. The binary never sees the launcher's `argv[0]` and prints `airs` whatever
   name started it (§21.2). An unsupported platform (Intel macOS, Windows, any other) and a missing optional
   dependency (`--omit=optional`, a platform mismatch) print `airs: …` naming `cargo install --locked airs-cli` and
   the Homebrew tap (plus `npm install -g @cdot65/prisma-airs-cli` for the missing package) and exit 1; a binary that

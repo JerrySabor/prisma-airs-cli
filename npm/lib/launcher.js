@@ -141,24 +141,44 @@ export function exitLike(result, proc = process) {
  * signals, and resolves to `{ code, signal }` when it exits. `env` gets
  * AIRS_NPM_LAUNCHER, the launcher's real path, so `airs doctor` counts the npm links to
  * it as this program.
+ *
+ * The handlers are installed before the spawn: on Linux the binary can be running (and
+ * a signal can arrive) before `spawn` returns, and a signal with no handler kills the
+ * launcher and orphans the binary. A signal that arrives during the spawn is sent once
+ * the child exists.
  */
 export function run({ binary, args, launcher, proc = process, spawnFn = spawn }) {
   const env = { ...proc.env, [LAUNCHER_VAR]: launcher };
-  const child = spawnFn(binary, args, { stdio: "inherit", env });
   const interactive = interactiveSession(proc);
+  let child = null;
+  const pending = [];
+  const send = (signal) => {
+    if (child.exitCode === null && child.signalCode === null) {
+      try {
+        child.kill(signal);
+      } catch {
+        // The child is gone; its exit event follows.
+      }
+    }
+  };
   const handlers = new Map();
   for (const signal of SIGNALS) {
     const handler = () => {
-      if (forwarded(signal, interactive) && child.exitCode === null && child.signalCode === null) {
-        try {
-          child.kill(signal);
-        } catch {
-          // The child is gone; its exit event follows.
-        }
+      if (!forwarded(signal, interactive)) {
+        return;
+      }
+      if (child === null) {
+        pending.push(signal);
+      } else {
+        send(signal);
       }
     };
     handlers.set(signal, handler);
     proc.on(signal, handler);
+  }
+  child = spawnFn(binary, args, { stdio: "inherit", env });
+  for (const signal of pending) {
+    send(signal);
   }
   return new Promise((resolve, reject) => {
     child.on("error", (error) => {

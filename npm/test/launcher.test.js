@@ -4,6 +4,7 @@
 // binary in its platform package.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import {
   chmodSync,
   cpSync,
@@ -31,6 +32,7 @@ import {
   missingMessage,
   platformKey,
   platformPackage,
+  run,
   unsupportedMessage,
 } from "../lib/launcher.js";
 
@@ -159,6 +161,37 @@ describe("signals", () => {
     ]);
   });
 
+  test("the handlers are installed before the spawn, and a signal during it is sent after", async () => {
+    const listeners = new Map();
+    const fake = {
+      env: {},
+      stdin: {},
+      stdout: {},
+      stderr: {},
+      on: (signal, handler) => listeners.set(signal, handler),
+      removeListener: (signal) => listeners.delete(signal),
+    };
+    const sent = [];
+    let child;
+    const spawnFn = () => {
+      assert.deepEqual([...listeners.keys()], SIGNALS, "handlers before the spawn");
+      listeners.get("SIGTERM")();
+      listeners.get("SIGINT")();
+      assert.deepEqual(sent, [], "nothing is sent before the child exists");
+      child = new EventEmitter();
+      child.exitCode = null;
+      child.signalCode = null;
+      child.kill = (signal) => sent.push(signal);
+      return child;
+    };
+    const result = run({ binary: "/x/airs", args: [], launcher: "/x/airs.js", proc: fake, spawnFn });
+    assert.deepEqual(sent, ["SIGTERM", "SIGINT"]);
+    listeners.get("SIGHUP")();
+    assert.deepEqual(sent, ["SIGTERM", "SIGINT", "SIGHUP"]);
+    child.emit("exit", 42, null);
+    assert.deepEqual(await result, { code: 42, signal: null });
+  });
+
   test("exitLike exits with the code, or re-raises the signal without the handlers", () => {
     const calls = [];
     const fake = {
@@ -254,7 +287,9 @@ describe("end to end", { skip: !HOST_SUPPORTED && `no prebuilt platform for ${HO
       const short = signal.slice(3);
       const launcher = installed(
         `forward-${short}`,
-        `trap 'echo got-${short}; exit 42' ${short}; echo ready; while :; do sleep 0.05; done`,
+        // The loop ends by itself (exit 9 after about 10 s), so a signal that never
+        // arrives fails the test instead of leaving an orphan holding the pipes open.
+        `trap 'echo got-${short}; exit 42' ${short}; echo ready; i=0; while [ $i -lt 200 ]; do sleep 0.05; i=$((i + 1)); done; exit 9`,
       );
       const child = spawn(process.execPath, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
       let stdout = "";
