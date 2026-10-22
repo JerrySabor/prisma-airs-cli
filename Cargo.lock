@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "airs-cli"
-version = "1.0.0"
+version = "8.0.0"
 dependencies = [
  "airs-test-harness",
  "clap",

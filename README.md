@@ -19,14 +19,14 @@ unchanged (D306).
 
 ## Status
 
-Version 1.0.0 covers milestones 1–3, the M3.5 foundations, M4t tenant writes, M4 runtime
+Version 8.0.0 covers milestones 1–3, the M3.5 foundations, M4t tenant writes, M4 runtime
 writes, M5 bulk scanning, M6a Red Team, M6b DLP, M6c Model Security, M6d Runtime extras, M6e
-Gateway and M6f Supplychain, and renames the executable to `airs` (1.0, DESIGN §21;
-[docs/MILESTONES.md](docs/MILESTONES.md)).
+Gateway and M6f Supplychain, renames the executable to `airs` (1.0, DESIGN §21;
+[docs/MILESTONES.md](docs/MILESTONES.md)), and replaces the TypeScript CLI (8.0).
 
-**The 8.0.0 plan.** This repository held the TypeScript CLI through 7.x; the Rust CLI moved
-in from `cdot/prisma-airs-cli-rs` (at `a9d7864`) and replaces it. The tree is still at
-1.0.0. The next release is **8.0.0**, the first from this repository and one version on
+**8.0.0.** This repository held the TypeScript CLI through 7.x; the Rust CLI moved
+in from `cdot/prisma-airs-cli-rs` (at `a9d7864`) and replaces it. 8.0.0 follows the Rust
+CLI's 1.0.0 and is the first release from this repository, with one version on
 every channel (crates.io, npm, Homebrew, the Forgejo release and the docs site): it adds
 the `airs-cli` name and the npm channel described below, and ports the TypeScript CLI
 7.3.0 changes (directional runtime security profiles, accepted against a live tenant, see
@@ -138,7 +138,7 @@ it is a native arm64 executable. Copy it onto your `PATH`, or install it with
 `cargo install --path .`.
 
 ```sh
-airs --version     # prints the version, e.g. 1.0.0
+airs --version     # prints the version, e.g. 8.0.0
 airs --help
 ```
 
@@ -147,7 +147,7 @@ order. Homebrew's Node puts npm's global commands in `/opt/homebrew/bin`, where 
 Homebrew formula links `airs` and `airs-cli` too, so an npm install and a Homebrew install
 collide there; a 7.x TypeScript `airs-cli` or an unrelated npm package named `airs` may
 also come first. Check with `type -a airs airs-cli airs-cli-rs` and `airs --version`
-(this CLI prints a bare version such as `1.0.0`). `airs doctor` reports it: its first
+(this CLI prints a bare version such as `8.0.0`). `airs doctor` reports it: its first
 check, `Executable`, warns when another `airs`, `airs-cli` or `airs-cli-rs` earlier on
 `PATH` resolves to a different file than the running program (it never fails the run).
 Keep one channel and uninstall the others.

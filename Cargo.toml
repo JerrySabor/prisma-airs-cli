@@ -19,7 +19,7 @@ all = { level = "warn", priority = -1 }
 [package]
 # The crate is `airs-cli`; the executable is `airs` (DESIGN §21.2).
 name = "airs-cli"
-version = "1.0.0"
+version = "8.0.0"
 description = "Native Rust CLI for Prisma AIRS (the airs command), built on the scm-sdk crate"
 edition.workspace = true
 rust-version.workspace = true
