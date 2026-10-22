@@ -415,9 +415,10 @@ Parity tests compare the TypeScript outcome lines on stdout with the Rust stderr
 run on the pty: airs-cli-rs with stdin and stderr on it (`spawn_pty`), TypeScript with
 stdout on it as well (`spawn_pty_all`), answering with `n\r`.
 
-`topics apply` and `revert` are family-B commands on the TypeScript side, so their
-parity scenarios set `PANW_MGMT_ENDPOINT` to the `/ts-env` base (`family_b` in
-`tests/parity_runtime_topics.rs`). A change between `apply`'s profile read and its PUT is
+`topics apply` and `revert` were family-B commands on the TypeScript side before 7.3.0, so
+their parity scenarios set `PANW_MGMT_ENDPOINT` to the `/ts-env` base (`family_b` in
+`tests/parity_runtime_topics.rs`); from 7.3.0 TypeScript uses the tenant's endpoint and
+ignores it (D93 narrowed). A change between `apply`'s profile read and its PUT is
 simulated with a one-shot `Route::Profiles` page that differs from the stored record.
 `topics eval` fixtures answer each prompt through `add_scan_verdict(marker, …)` with
 `prompt_detected.topic_violation` set; concurrency is tested with every scan hanging
@@ -436,6 +437,17 @@ D109 test, which gives its `git config user.email` a sandboxed configuration
 `next_offset: 0` (D108), so the D108 test answers its first two pages explicitly; the
 Rust walk is also tested with the server's `set_zero_next_offset_on_last_page(true)`
 and with a repeated cursor.
+
+Directional profile tests (8.0, DESIGN §13.17) seed TypeScript 7.3.0's own fixture,
+`fixtures::runtime::directional_profile()` (`crates/airs-test-harness/data/directional-security-profile.json`,
+copied verbatim from the tag): one `per_content_type` entry with all four directions,
+detector severities and a `dlp_tenant_id`. A POST answer echoes the body's
+`dlp_tenant_id`, as the service and the TypeScript spec's server do.
+`tests/parity_runtime_directional.rs` runs every scenario of 7.3.0's
+`tests/integration/directional-security-profiles.spec.ts` on both CLIs (its own `exec`
+seeds the profile, the `Restricted` topic and `TMP/profile.json`); legacy and multi-entry
+variants are built from the same fixture. The report, transfer and write parity files
+each add a directional scenario.
 
 ### 5.8 `--debug` tests
 

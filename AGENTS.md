@@ -5,8 +5,10 @@ this repository, `cdot/prisma-airs-cli`, held the TypeScript CLI until 7.x, and 
 it holds the Rust CLI (crate `airs-cli`, command `airs`). The TypeScript reference is
 this repository's own history at the commit pinned in `scripts/build-reference-cli.sh`
 (the TypeScript sources are no longer in the tree; they stay in the history and in every
-`v7.*` tag, which must never be deleted). It is built on the published `scm-sdk` crate
-(exact pin `=0.2.3`, imported as `scm`). The goal is full parity without the TypeScript
+`v7.*` tag, which must never be deleted); from 8.0 that is the final TypeScript release,
+tag `v7.3.0` (docs/TESTING.md §3.4). It is built on the `scm-sdk` crate, imported as `scm`:
+until scm-sdk 0.2.4 is on crates.io, temporarily the exact Forgejo commit `4825616` of its
+TypeScript 0.35.0 overlay (a git dependency, DESIGN §15.25), then the exact pin `=0.2.4`. The goal is full parity without the TypeScript
 CLI: the pinned reference commit is a frozen spec, not a companion. The scope, the drops
 and renames, and the milestone order are recorded in
 [docs/MILESTONES.md](docs/MILESTONES.md).

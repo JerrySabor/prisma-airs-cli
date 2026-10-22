@@ -12,7 +12,7 @@ Paths are abbreviated:
 
 | Prefix | Path |
 |---|---|
-| TS | this repository's history at `5711012` (7.2.1-forgejo.0, the frozen reference; until 8.0 the separate checkout `/Users/cdot/development/redtail/prisma-airs-cli`) |
+| TS | this repository's history at tag `v7.3.0` (`7a54e46`, 7.3.0, the final frozen reference from 8.0; before it `5711012`, 7.2.1-forgejo.0, and until 8.0 the separate checkout `/Users/cdot/development/redtail/prisma-airs-cli`) |
 | H | `/Users/cdot/development/cdot65/prisma-airs-harness` |
 | S | `/Users/cdot/development/redtail/scm-sdk-rs` |
 
@@ -91,6 +91,7 @@ Every row is pinned by a test listed in [COMPATIBILITY.md](COMPATIBILITY.md) §4
 | Renamed command groups | `aigateway` → `gateway` and `agentguard` → `supplychain`. Config keys are renamed too, and no aliases exist. |
 | Dropped commands | `completion`, `redteam judge`, `runtime dlp generate` |
 | Dropped formats | `--output markdown\|csv\|yaml` is a usage error (exit 2). A tenant `defaultOutput` that names one of them makes the config invalid. |
+| Directional profiles (8.0, TS 7.3.0) | `runtime profiles create\|update` and `topics apply\|revert` take `--direction` and `--ai-profile-index` (decimal digits only, D332); the `--no-…` flags and `--[no-]enable-full-conversation-inspection` exist; `profiles create --config` takes the name from the file and refuses `--name`; `--config` is exclusive with every write flag. A create with no policy flag is refused (TS 7.3.0 creates an empty policy, D102); `revert` keeps a still-referenced topic with exit 0 (TS fails, D99). Experimental: no live acceptance yet (DESIGN §13.17). |
 | Version | `--version` reports `0.N.0` until 1.0, `1.0.0` for 1.0, and from 8.0.0 the one version shared by every channel |
 | Exit codes | Argument-parse errors exit 2, not 1, and usage is checked before the tenant is read (D1, D2, D18). Signals give 130/143. |
 | Scans fail closed | A failed scan prints `FAILED` and exits 1; TypeScript printed `ALLOW` and exited 0 (D6). Response detections count (D7). A scan is never re-sent (D9). |
