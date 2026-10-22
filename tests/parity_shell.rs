@@ -111,7 +111,7 @@ fn wire(requests: &[NormalizedRequest]) -> Vec<String> {
 // Version (D26: different product versions, same bare format)
 // ---------------------------------------------------------------------------
 
-/// D26: TS prints `7.2.1-forgejo.0`, Rust `0.1.0`; both bare, stdout only, exit 0.
+/// D26: TS prints `7.3.0`, Rust `0.1.0`; both bare, stdout only, exit 0.
 #[test]
 fn version_format_parity_d26() {
     let Some(ts) = require_ts("version_format_parity_d26") else {
@@ -120,7 +120,7 @@ fn version_format_parity_d26() {
     for args in [&["-V"][..], &["--version"]] {
         let (t, r) = both(&ts, Tenant::Prod, &no_setup, args);
         assert_eq!((t.run.code, r.run.code), (0, 0), "{args:?}");
-        assert_eq!(t.run.stdout, "7.2.1-forgejo.0\n");
+        assert_eq!(t.run.stdout, "7.3.0\n");
         assert_eq!(r.run.stdout, concat!(env!("CARGO_PKG_VERSION"), "\n"));
         assert_eq!((t.run.stderr.as_str(), r.run.stderr.as_str()), ("", ""));
         for out in [&t, &r] {
@@ -148,7 +148,7 @@ fn version_anywhere_before_double_dash_parity() {
     ] {
         let (t, r) = both(&ts, Tenant::Prod, &no_setup, args);
         assert_eq!((t.run.code, r.run.code), (0, 0), "{args:?}");
-        assert_eq!(t.run.stdout, "7.2.1-forgejo.0\n", "{args:?}");
+        assert_eq!(t.run.stdout, "7.3.0\n", "{args:?}");
         assert_eq!(
             r.run.stdout,
             concat!(env!("CARGO_PKG_VERSION"), "\n"),
@@ -284,7 +284,7 @@ fn d330_airs_cli_is_a_name_of_the_rust_cli() {
     }
     let (t, _) = both(&ts, Tenant::Prod, &no_setup, &["--version"]);
     let a = scenario(&alias, Tenant::Prod, &no_setup, &["--version"]);
-    assert_eq!(t.run.stdout, "7.2.1-forgejo.0\n");
+    assert_eq!(t.run.stdout, "7.3.0\n");
     assert_eq!(a.run.stdout, format!("{}\n", env!("CARGO_PKG_VERSION")));
 }
 

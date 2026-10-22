@@ -165,7 +165,7 @@ error never needs a selected tenant, never causes an HTTP request and never writ
   [    <extra detail line>\n ...]
   \n
   ```
-  The `Re-run with --debug …` hint (TS text, `src/cli/renderer/common.ts:18-22`) follows
+  The `Re-run with --debug …` hint (TS text, `src/cli/renderer/common.ts:19-23`) follows
   the `HTTP <status>` line, and only that line: it appears exactly when the block has an
   `HTTP <status>` line and `--debug` is off. Under `--debug` it is omitted, because the
   notice already named the log (D69). The Rust-only detail lines (`Request ID: …`,
@@ -8701,7 +8701,7 @@ field is set; a row without `id` omits its id line and a missing `name` prints a
 | profiles | `Data Profiles` | `  <id>\n    <name>  <type>  <profile_status>[ <profile_type>][ v<version>]` |
 | dictionaries | `Data Dictionaries` | `  <id>\n    <name>  <type>  <status>[ <keywords.length> kw][ v<version>]` |
 
-**Table lists** (TS `common.ts:126-139`, the §2.7 table): columns `ID, Name, Type, Direction,
+**Table lists** (TS `common.ts:127-140`, the §2.7 table): columns `ID, Name, Type, Direction,
 Severity, Version` (filtering profiles), `ID, Name, Type, Status, Technique, Version` (patterns),
 `ID, Name, Type, Profile Type, Status, Version` (profiles), `ID, Name, Type, Status, Keywords,
 Version` (dictionaries; `Keywords` is the count, empty without `--keywords`). Empty: nothing on
@@ -10118,7 +10118,7 @@ message).
   `terminal_safe`, no trailing blank line; MI§3). Without `--url-file` stderr adds the dim hint
   `  The index credential is withheld; pass --url-file <path> to save the full URL in a new private file.`
   (quiet-suppressed).
-- json: `{"url": "<withheld form>", "expiresAt": "<expires_at>"}` (TS's service shape, `types.ts:911-914`).
+- json: `{"url": "<withheld form>", "expiresAt": "<expires_at>"}` (TS's service shape, `types.ts:915-918`).
 - table: `Key │ Value` with the rows `url` and `expiresAt`.
 TS prints the full URL in its only (pretty) layout, also under `--quiet` (MI§3).
 
@@ -11678,11 +11678,11 @@ Every behaviour above gets an executable test (`tests/runtime_extras_*.rs`, `tes
 
 | TypeScript spec | Rust acceptance tests (adjusted by the §12 rows) |
 |---|---|
-| `unit/airs/management.spec.ts:1071-1117` | api-key list projections with schema-valid wire records (`creation_ts`, `expiration`, D207) and `nextOffset`; `create` sends the config unchanged (one POST, D95); `regenerate(id, body)`; `delete(name, updatedBy)` acknowledges with the fixed text (D208) |
-| `management.spec.ts:1123-1170` | customer-app names and ids (`customer_appId`, D207); `get` by name; `update(id, body)` prints the updated name; `delete(name, updatedBy)` names the argument (D208) |
-| `management.spec.ts:1176-1194` | deployment profiles as rows; `--unactivated` sends `?unactivated=true` |
-| `management.spec.ts:1200-1225` | `scan-logs query` sends nothing (not even the token) and exits 1 with the §18.11 text |
-| `management.spec.ts:1227-1440` | consumption: the app id from the overview, both reads with `{appId, appName, timeInterval}` (default 30, `--time-interval 60` passed through, the window on the lookup too, D211); not found lists names and sends neither read; a shared app id with two names resolves the named bucket, two ids with one name are refused (D211); `null` stats and an empty breakdown print no invented zeros (D209); the walk follows `total_items` past a capped page (`limit 2`, second call `offset 2`, total 3), drops items without a string id or name with the warning, empty items |
+| `unit/airs/management.spec.ts:1075-1121` | api-key list projections with schema-valid wire records (`creation_ts`, `expiration`, D207) and `nextOffset`; `create` sends the config unchanged (one POST, D95); `regenerate(id, body)`; `delete(name, updatedBy)` acknowledges with the fixed text (D208) |
+| `management.spec.ts:1127-1174` | customer-app names and ids (`customer_appId`, D207); `get` by name; `update(id, body)` prints the updated name; `delete(name, updatedBy)` names the argument (D208) |
+| `management.spec.ts:1180-1198` | deployment profiles as rows; `--unactivated` sends `?unactivated=true` |
+| `management.spec.ts:1204-1229` | `scan-logs query` sends nothing (not even the token) and exits 1 with the §18.11 text |
+| `management.spec.ts:1231-1444` | consumption: the app id from the overview, both reads with `{appId, appName, timeInterval}` (default 30, `--time-interval 60` passed through, the window on the lookup too, D211); not found lists names and sends neither read; a shared app id with two names resolves the named bucket, two ids with one name are refused (D211); `null` stats and an empty breakdown print no invented zeros (D209); the walk follows `total_items` past a capped page (`limit 2`, second call `offset 2`, total 3), drops items without a string id or name with the warning, empty items |
 | `unit/cli/aliases.spec.ts:55-79` | `ls` on `api-keys`, `customer-apps`, `deployment-profiles` and `sessions` lists; `rm` on `api-keys delete` and `customer-apps delete` |
 | `unit/cli/flag-standardization.spec.ts:66,253-280` | `scan-logs query` accepts `--limit`, `--offset` and the hidden `--page`/`--page-size` and still sends nothing |
 | `unit/config/client-options.spec.ts:113-133` | `mgmtEndpoint` and `mgmtDashboardEndpoint` overrides and defaults (the dashboard default is not `mgmtEndpoint`), explicit OAuth values, `PANW_*` ignored (COMPATIBILITY.md §5.2 gains the dashboard rows) |

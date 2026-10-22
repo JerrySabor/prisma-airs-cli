@@ -107,9 +107,11 @@ Script environment:
 
 ### 3.2 Pin and Node version
 
-The pin is `5711012246d325f20dbe93b710dcc697a7f18a8a` (package `7.2.1-forgejo.0`). It
+The pin is `7a54e46eee4f7914d610bc78d2f98dd7de09fbfe`, tag `v7.3.0` (package `7.3.0`,
+TS SDK `@cdot65/prisma-airs-sdk` 0.35.0), the final TypeScript release (8.0; before it,
+`5711012246d325f20dbe93b710dcc697a7f18a8a`, package `7.2.1-forgejo.0`, SDK 0.34.0). It
 is written once, as the default of `PINNED_COMMIT` in `scripts/build-reference-cli.sh`;
-the harness reads it from there. The parity expectations were recorded against this
+the harness reads it from there. The parity expectations are recorded against this
 commit and Node 24, so the harness requires node major 24
 (`SUPPORTED_NODE_MAJOR` in `crates/airs-test-harness/src/runner.rs`), even though the
 TypeScript package itself accepts older versions.
@@ -132,7 +134,50 @@ skipped instead, and each prints `PARITY SKIPPED (<test>): <reason>` to the real
 visible even for passing tests. A skipped run is not a finished check.
 `AIRS_REQUIRE_PARITY=1` overrides `AIRS_ALLOW_PARITY_SKIP=1`.
 
-### 3.4 Observed TypeScript behaviour
+### 3.4 Moving the reference
+
+The reference is a tagged TypeScript release in this repository's own history. **The move
+to 7.3.0 (8.0) is the final one**: the TypeScript CLI is end-of-life, so no later
+TypeScript commit will become the reference, and the reference history (the commits up to
+every `v7.*` tag) must never be rewritten or its tags deleted. The procedure, as followed
+for 7.3.0:
+
+1. **Choose the commit.** A tag of a published TypeScript release (`git rev-parse
+   v7.3.0^{commit}`), never a branch tip. Record what the new commit changes in
+   `src/` against the old pin (`git diff --stat <old> <new> -- src tests package.json`);
+   for 7.3.0 the 21 commits on `main` that the tag lacks touch no `src/` (CI, docs and
+   package metadata only).
+2. **Move the pin.** Set `PINNED_COMMIT` in `scripts/build-reference-cli.sh` to the full
+   SHA. Nothing else holds it: the harness reads it from the script (§3.3), and the CI
+   cache key (`.forgejo/workflows/ci.yml`, `ci-macos.yml`) is
+   `ts-reference-v1-<os>-<arch>-node<major>-<commit>-<hash of the script>`, so it changes
+   with the pin; check that both workflows still read it with their `sed` expression.
+3. **Build it.** `scripts/build-reference-cli.sh` (it fetches and checks out the new pin
+   in the existing clone; `--verify` afterwards). 7.3.0 installs the deprecated but
+   installable `@cdot65/prisma-airs-sdk@0.35.0` from npm through its frozen lockfile.
+4. **Run the whole suite against it** (`AIRS_REQUIRE_PARITY=1 cargo test --workspace
+   --no-fail-fast`) before changing any Rust code, and list every failure: each is a
+   behaviour the new reference changed (for 7.3.0: 22 failures, the version, the profile
+   and topic writes, and the profile detail).
+5. **Classify each failure.** Port the new behaviour (DESIGN gets the section that
+   specifies it), or keep the Rust behaviour with a §12 row and a `dNN_` test asserting
+   both sides, or retire or reword the §12 rows the new reference now matches (the row
+   stays, marked `retired in <version>`, with its number never reused, and its test
+   becomes a parity test).
+6. **Refresh the records.** `--version` expectations (`tests/parity_shell.rs`, D26);
+   the source basis and every TypeScript `file:line` citation in `docs/COMPATIBILITY.md`
+   and DESIGN (only files the new commit changed can move: map each cited range through
+   `git diff -U0 <old> <new> -- <file>`, and re-read any range a hunk touches); the header
+   of `docs/research/ts-baseline-observed.md`.
+7. **Re-run the observed baseline** (§3.5) and diff it with the old reference's output
+   (build the old pin in a scratch directory and point `AIRS_TS_CLI_ENTRY` at its
+   `dist/cli/index.js`); normalise ports, durations, sandbox paths and ids. For 7.3.0 the
+   only differences were `--version` and the SDK user agent.
+8. **Finish with the definition of done** (`docs/MILESTONES.md`): fmt, clippy with
+   `-D warnings`, and `AIRS_REQUIRE_PARITY=1 cargo test --workspace` with no
+   `PARITY SKIPPED` line.
+
+### 3.5 Observed TypeScript behaviour
 
 `docs/research/ts-baseline-observed.md` records what the reference does against the
 fixture server. Refresh it with:
