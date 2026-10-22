@@ -644,12 +644,14 @@ pub fn plan(cli: &Cli) -> Result<Plan, CliError> {
                     let format = output::validate_explicit(explicit)?;
                     Plan::ProfilesGet(pagination::parse_get(&args.lookup)?, format)
                 }
+                // 7.3.0 resolves these two like reads: the tenant's `defaultOutput` applies
+                // (§13.17).
                 Some(ProfilesCommand::Create(args)) => {
-                    let format = runtime_write_format(cli)?;
+                    let format = output::validate_explicit(explicit)?;
                     Plan::ProfilesCreate(Box::new(profile_write::plan_create(args, format)?))
                 }
                 Some(ProfilesCommand::Update(args)) => {
-                    let format = runtime_write_format(cli)?;
+                    let format = output::validate_explicit(explicit)?;
                     Plan::ProfilesUpdate(Box::new(profile_write::plan_update(args, format)?))
                 }
                 Some(ProfilesCommand::Delete(args)) => {

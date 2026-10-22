@@ -23,6 +23,7 @@ mod modelsec;
 mod output;
 mod pagination;
 mod policy;
+mod profile_policy;
 mod redteam;
 mod render;
 mod report;

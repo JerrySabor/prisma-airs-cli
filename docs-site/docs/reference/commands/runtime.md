@@ -1168,36 +1168,73 @@ Options:
 ```text
 Create a new security profile
 
-Usage: airs runtime profiles create [OPTIONS] --name <name>
+Usage: airs runtime profiles create [OPTIONS]
 
 Options:
-      --name <name>                     Profile name
-      --output <format>                 Output format: pretty, table, json
-      --no-active                       Create profile as inactive
-      --quiet                           Suppress status and decorative output (data and errors still print)
-      --debug                           Write redacted API diagnostics to a private JSONL file
-      --prompt-injection <action>       Prompt injection action (block/allow/alert)
-      --tenant <name>                   Use this registered tenant for one invocation without changing the selection
-      --toxic-content <action>          Toxic content action (e.g. "high:block, moderate:block")
-      --contextual-grounding <action>   Contextual grounding action (block/allow/alert)
-      --malicious-code <action>         Malicious code protection action (block/allow/alert)
-      --url-action <action>             URL detected action (block/allow/alert)
-      --allow-url-categories <list>     Comma-separated URL categories to allow
-      --block-url-categories <list>     Comma-separated URL categories to block
-      --alert-url-categories <list>     Comma-separated URL categories to alert
-      --agent-security <action>         Agent security action (block/allow/alert)
-      --dlp-action <action>             Data leak detection action (block/allow/alert)
-      --dlp-profiles <list>             Comma-separated DLP profile names
-      --mask-data-inline                Mask detected data inline
-      --db-security-create <action>     Database create action (block/allow/alert)
-      --db-security-read <action>       Database read action (block/allow/alert)
-      --db-security-update <action>     Database update action (block/allow/alert)
-      --db-security-delete <action>     Database delete action (block/allow/alert)
-      --inline-timeout-action <action>  Inline timeout action (block/allow)
-      --max-inline-latency <n>          Max inline latency in seconds
-      --mask-data-in-storage            Mask data in storage
-      --config <path>                   JSON file with profile configuration (legacy)
-  -h, --help                            Print help
+      --name <name>
+          Profile name (required unless --config is supplied)
+      --output <format>
+          Output format: pretty, table, json
+      --no-active
+          Create profile as inactive
+      --quiet
+          Suppress status and decorative output (data and errors still print)
+      --debug
+          Write redacted API diagnostics to a private JSONL file
+      --prompt-injection <action>
+          Prompt injection action (block/allow/alert)
+      --tenant <name>
+          Use this registered tenant for one invocation without changing the selection
+      --toxic-content <action>
+          Toxic content action (e.g. "high:block, moderate:block")
+      --contextual-grounding <action>
+          Contextual grounding action (block/allow/alert)
+      --malicious-code <action>
+          Malicious code protection action (block/allow/alert)
+      --url-action <action>
+          URL detected action (block/allow/alert)
+      --allow-url-categories <list>
+          Comma-separated URL categories to allow
+      --block-url-categories <list>
+          Comma-separated URL categories to block
+      --alert-url-categories <list>
+          Comma-separated URL categories to alert
+      --agent-security <action>
+          Agent security action (block/allow/alert)
+      --dlp-action <action>
+          Data leak detection action (block/allow/alert)
+      --dlp-profiles <list>
+          Comma-separated DLP profile names
+      --mask-data-inline
+          Mask detected data inline
+      --no-mask-data-inline
+          Disable inline masking
+      --db-security-create <action>
+          Database create action (block/allow/alert)
+      --db-security-read <action>
+          Database read action (block/allow/alert)
+      --db-security-update <action>
+          Database update action (block/allow/alert)
+      --db-security-delete <action>
+          Database delete action (block/allow/alert)
+      --inline-timeout-action <action>
+          Inline timeout action (block/allow)
+      --max-inline-latency <n>
+          Max inline latency in seconds
+      --mask-data-in-storage
+          Mask data in storage
+      --no-mask-data-in-storage
+          Disable storage masking
+      --enable-full-conversation-inspection
+          Enable shared conversation inspection
+      --no-enable-full-conversation-inspection
+          Disable shared conversation inspection
+      --direction <direction>
+          Protection direction: prompt, response, tool-call, tool-response
+      --config <path>
+          Complete JSON profile configuration; exclusive with write flags
+  -h, --help
+          Print help
 ```
 
 ### airs runtime profiles delete
@@ -1308,34 +1345,74 @@ Arguments:
   <nameOrId>  Profile name or UUID
 
 Options:
-      --name <name>                     Update profile name
-      --output <format>                 Output format: pretty, table, json
-      --active                          Set profile as active
-      --quiet                           Suppress status and decorative output (data and errors still print)
-      --debug                           Write redacted API diagnostics to a private JSONL file
-      --no-active                       Set profile as inactive
-      --prompt-injection <action>       Prompt injection action (block/allow/alert)
-      --tenant <name>                   Use this registered tenant for one invocation without changing the selection
-      --toxic-content <action>          Toxic content action (e.g. "high:block, moderate:block")
-      --contextual-grounding <action>   Contextual grounding action (block/allow/alert)
-      --malicious-code <action>         Malicious code protection action (block/allow/alert)
-      --url-action <action>             URL detected action (block/allow/alert)
-      --allow-url-categories <list>     Comma-separated URL categories to allow
-      --block-url-categories <list>     Comma-separated URL categories to block
-      --alert-url-categories <list>     Comma-separated URL categories to alert
-      --agent-security <action>         Agent security action (block/allow/alert)
-      --dlp-action <action>             Data leak detection action (block/allow/alert)
-      --dlp-profiles <list>             Comma-separated DLP profile names
-      --mask-data-inline                Mask detected data inline
-      --db-security-create <action>     Database create action (block/allow/alert)
-      --db-security-read <action>       Database read action (block/allow/alert)
-      --db-security-update <action>     Database update action (block/allow/alert)
-      --db-security-delete <action>     Database delete action (block/allow/alert)
-      --inline-timeout-action <action>  Inline timeout action (block/allow)
-      --max-inline-latency <n>          Max inline latency in seconds
-      --mask-data-in-storage            Mask data in storage
-      --config <path>                   JSON file with profile updates (legacy)
-  -h, --help                            Print help
+      --name <name>
+          Update profile name
+      --output <format>
+          Output format: pretty, table, json
+      --active
+          Set profile as active
+      --quiet
+          Suppress status and decorative output (data and errors still print)
+      --debug
+          Write redacted API diagnostics to a private JSONL file
+      --no-active
+          Set profile as inactive
+      --prompt-injection <action>
+          Prompt injection action (block/allow/alert)
+      --tenant <name>
+          Use this registered tenant for one invocation without changing the selection
+      --toxic-content <action>
+          Toxic content action (e.g. "high:block, moderate:block")
+      --contextual-grounding <action>
+          Contextual grounding action (block/allow/alert)
+      --malicious-code <action>
+          Malicious code protection action (block/allow/alert)
+      --url-action <action>
+          URL detected action (block/allow/alert)
+      --allow-url-categories <list>
+          Comma-separated URL categories to allow
+      --block-url-categories <list>
+          Comma-separated URL categories to block
+      --alert-url-categories <list>
+          Comma-separated URL categories to alert
+      --agent-security <action>
+          Agent security action (block/allow/alert)
+      --dlp-action <action>
+          Data leak detection action (block/allow/alert)
+      --dlp-profiles <list>
+          Comma-separated DLP profile names
+      --mask-data-inline
+          Mask detected data inline
+      --no-mask-data-inline
+          Disable inline masking
+      --db-security-create <action>
+          Database create action (block/allow/alert)
+      --db-security-read <action>
+          Database read action (block/allow/alert)
+      --db-security-update <action>
+          Database update action (block/allow/alert)
+      --db-security-delete <action>
+          Database delete action (block/allow/alert)
+      --inline-timeout-action <action>
+          Inline timeout action (block/allow)
+      --max-inline-latency <n>
+          Max inline latency in seconds
+      --mask-data-in-storage
+          Mask data in storage
+      --no-mask-data-in-storage
+          Disable storage masking
+      --enable-full-conversation-inspection
+          Enable shared conversation inspection
+      --no-enable-full-conversation-inspection
+          Disable shared conversation inspection
+      --direction <direction>
+          Protection direction: prompt, response, tool-call, tool-response
+      --ai-profile-index <n>
+          Select an AI entry in a multi-entry policy (zero-based)
+      --config <path>
+          Complete JSON replacement; exclusive with write flags
+  -h, --help
+          Print help
 ```
 
 ## airs runtime report
@@ -1597,14 +1674,16 @@ Assign a topic to a security profile (additive)
 Usage: airs runtime topics apply [OPTIONS] --profile <name> --name <name>
 
 Options:
-      --output <format>  Output format: pretty, table, json
-      --profile <name>   Security profile name
-      --name <name>      Topic name to assign
-      --quiet            Suppress status and decorative output (data and errors still print)
-      --debug            Write redacted API diagnostics to a private JSONL file
-      --intent <intent>  Topic intent: block or allow [default: block]
-      --tenant <name>    Use this registered tenant for one invocation without changing the selection
-  -h, --help             Print help
+      --output <format>        Output format: pretty, table, json
+      --profile <name>         Security profile name
+      --name <name>            Topic name to assign
+      --quiet                  Suppress status and decorative output (data and errors still print)
+      --debug                  Write redacted API diagnostics to a private JSONL file
+      --intent <intent>        Topic intent: block or allow [default: block]
+      --direction <direction>  Protection direction: prompt, response, tool-call, tool-response
+      --tenant <name>          Use this registered tenant for one invocation without changing the selection
+      --ai-profile-index <n>   AI profile entry index (zero-based)
+  -h, --help                   Print help
 ```
 
 ### airs runtime topics create
@@ -1722,14 +1801,16 @@ Remove a custom topic from a profile and delete it
 Usage: airs runtime topics revert [OPTIONS] --profile <name> --name <name>
 
 Options:
-      --output <format>  Output format: pretty, table, json
-      --profile <name>   Security profile name
-      --name <name>      Topic name to remove
-      --quiet            Suppress status and decorative output (data and errors still print)
-      --debug            Write redacted API diagnostics to a private JSONL file
-      --force            Skip confirmation prompt
-      --tenant <name>    Use this registered tenant for one invocation without changing the selection
-  -h, --help             Print help
+      --output <format>        Output format: pretty, table, json
+      --profile <name>         Security profile name
+      --name <name>            Topic name to remove
+      --quiet                  Suppress status and decorative output (data and errors still print)
+      --debug                  Write redacted API diagnostics to a private JSONL file
+      --force                  Skip confirmation prompt
+      --direction <direction>  Protection direction: prompt, response, tool-call, tool-response
+      --tenant <name>          Use this registered tenant for one invocation without changing the selection
+      --ai-profile-index <n>   AI profile entry index (zero-based)
+  -h, --help                   Print help
 ```
 
 ### airs runtime topics sample
