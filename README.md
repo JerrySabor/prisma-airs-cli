@@ -415,6 +415,8 @@ airs runtime topics revert --profile Directional --name Restricted --direction p
 - `topics revert --direction` refuses while another direction, AI entry or a retained
   legacy block still references the topic.
 - `profiles get` shows `DLP tenant` and `Protection locations`; json adds `dlpTenantId`.
+  Settings you do not pass are never written; unknown directions are kept; a `--config`
+  file's new fields are checked before the tenant (a string `dlp_tenant_id`, never `null`).
   `runtime report` adds a `Protection configurations` column, and profile backup and
   restore carry every direction.
 

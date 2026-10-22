@@ -16,7 +16,8 @@ use serde::Serialize;
 
 /// `{profileId, profileName, revision, active, createdBy, updatedBy, lastModifiedTs, policy,
 /// dlpTenantId}` (`dlpTenantId` from 8.0, TS 7.3.0, only when the record carries
-/// `dlp_tenant_id`).
+/// `dlp_tenant_id`, with the value it carries: a string, or an unexpected `null` or other
+/// value that scm-sdk 0.2.4 keeps in the model's extensions, D334).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileView<'a> {
@@ -38,7 +39,7 @@ pub struct ProfileView<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy: Option<OValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub dlp_tenant_id: Option<&'a str>,
+    pub dlp_tenant_id: Option<OValue>,
 }
 
 impl<'a> ProfileView<'a> {
@@ -73,12 +74,30 @@ impl<'a> ProfileView<'a> {
                 .into_option()
                 .map(printed_policy)
                 .transpose()?,
-            dlp_tenant_id: profile
-                .dlp_tenant_id
-                .as_ref()
-                .into_option()
-                .map(String::as_str),
+            dlp_tenant_id: dlp_tenant_id(profile)?,
         })
+    }
+}
+
+/// The record's `dlp_tenant_id` as the server sent it: the typed string, else the value
+/// scm-sdk 0.2.4 keeps in the extensions when it is not a string (an explicit `null`
+/// included, D334); `None` when the key is absent.
+fn dlp_tenant_id(profile: &SecurityProfile) -> Result<Option<OValue>, CliError> {
+    match profile.dlp_tenant_id.as_ref().into_option() {
+        Some(text) => Ok(Some(OValue::String(text.clone()))),
+        None => profile
+            .extensions
+            .get("dlp_tenant_id")
+            .map(ordered)
+            .transpose(),
+    }
+}
+
+/// The pretty `DLP tenant` value: a string as is, anything else as compact JSON (D334).
+fn dlp_tenant_text(value: &OValue) -> Result<String, CliError> {
+    match value {
+        OValue::String(text) => Ok(text.clone()),
+        other => json::to_compact(other).map_err(|_| serialization_failed()),
     }
 }
 
@@ -402,8 +421,9 @@ fn render_profile(
                 ("Name", terminal_safe(view.profile_name).into_owned()),
                 ("Status", status_word(out, view.active)),
             ];
-            if let Some(tenant) = view.dlp_tenant_id {
-                pairs.push(("DLP tenant", terminal_safe(tenant).into_owned()));
+            if let Some(tenant) = &view.dlp_tenant_id {
+                let text = dlp_tenant_text(tenant)?;
+                pairs.push(("DLP tenant", terminal_safe(&text).into_owned()));
             }
             if let Some(revision) = view.revision {
                 pairs.push(("Revision", revision_text(revision)));
@@ -725,6 +745,127 @@ mod tests {
             crate::json::to_pretty(&profile_views(&[bare]).unwrap()).unwrap(),
             "[\n  {\n    \"profileName\": \"p\",\n    \"createdBy\": \"a\",\n    \"updatedBy\": \"b\"\n  }\n]"
         );
+    }
+
+    /// §15.25: scm-sdk 0.2.4 serialises an AI entry and `model-configuration` in its 0.34.0
+    /// field order (the new fields last), so the views keep reordering them to TypeScript
+    /// SDK 0.35.0's order. The reorder moves keys only: every key, an unknown one and an
+    /// explicit `null` included, is printed.
+    #[test]
+    fn the_printed_policy_reorders_keys_and_drops_nothing() {
+        let policy: Policy = serde_json::from_value(json!({"ai-security-profiles": [{
+            "model-configuration": {
+                "latency": {"max-inline-latency": 5},
+                "enable-full-conversation-inspection": false,
+                "model-protection": [],
+                "future": null,
+                "mask-data-in-storage": true,
+            },
+            "content-type-configurations": {"prompt": {}, "audio": {"x": 1}},
+            "content-type-mode": "per_content_type",
+            "model-type": "default",
+            "zz-unknown": null,
+        }]}))
+        .unwrap();
+        let keys = |value: &OValue| -> Vec<String> {
+            value
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(key, _)| key.clone())
+                .collect()
+        };
+        let sdk = crate::json::to_ordered(&policy).unwrap();
+        let sdk_entry = &sdk.get("ai-security-profiles").unwrap().as_array().unwrap()[0];
+        assert_eq!(
+            keys(sdk_entry),
+            [
+                "model-type",
+                "model-configuration",
+                "content-type-mode",
+                "content-type-configurations",
+                "zz-unknown"
+            ],
+            "scm-sdk 0.2.4's AI entry order; when it changes, revisit AI_ENTRY_ORDER"
+        );
+        assert_eq!(
+            keys(sdk_entry.get("model-configuration").unwrap()),
+            [
+                "mask-data-in-storage",
+                "latency",
+                "model-protection",
+                "enable-full-conversation-inspection",
+                "future"
+            ],
+            "scm-sdk 0.2.4's model-configuration order"
+        );
+        let printed = printed_policy(&policy).unwrap();
+        let entry = &printed
+            .get("ai-security-profiles")
+            .unwrap()
+            .as_array()
+            .unwrap()[0];
+        assert_eq!(
+            keys(entry),
+            [
+                "model-type",
+                "content-type-mode",
+                "content-type-configurations",
+                "model-configuration",
+                "zz-unknown"
+            ]
+        );
+        assert_eq!(
+            keys(entry.get("model-configuration").unwrap()),
+            [
+                "model-protection",
+                "mask-data-in-storage",
+                "latency",
+                "enable-full-conversation-inspection",
+                "future"
+            ]
+        );
+        assert_eq!(
+            crate::json::value_of(&printed),
+            serde_json::to_value(&policy).unwrap()
+        );
+    }
+
+    /// D334: `dlpTenantId` is the record's value as sent: a string, an unexpected `null`
+    /// or number kept by scm-sdk 0.2.4's extensions; absent when the record has none.
+    #[test]
+    fn the_dlp_tenant_id_is_printed_as_sent() {
+        for (value, json_text, pretty_line) in [
+            (
+                json!("8259670718644550000"),
+                "\"8259670718644550000\"",
+                "  DLP tenant  8259670718644550000\n",
+            ),
+            (json!(null), "null", "  DLP tenant  null\n"),
+            (json!(42), "42", "  DLP tenant  42\n"),
+        ] {
+            let row = profile(json!({"profile_name": "p", "active": true, "dlp_tenant_id": value}));
+            let view = crate::json::to_compact(&ProfileView::new(&row).unwrap()).unwrap();
+            assert_eq!(
+                view,
+                format!(r#"{{"profileName":"p","active":true,"dlpTenantId":{json_text}}}"#)
+            );
+            let (mut out, stdout, _) = crate::output::testing::capture(false);
+            render_profile_detail(&mut out, &row, Format::Pretty).unwrap();
+            out.commit().unwrap();
+            assert!(stdout.text().contains(pretty_line), "{}", stdout.text());
+            let (mut out, stdout, _) = crate::output::testing::capture(false);
+            render_profile_detail(&mut out, &row, Format::Table).unwrap();
+            out.commit().unwrap();
+            assert!(stdout.text().contains("dlpTenantId"), "{}", stdout.text());
+        }
+        let bare = profile(json!({"profile_name": "p"}));
+        let view = crate::json::to_compact(&ProfileView::new(&bare).unwrap()).unwrap();
+        assert_eq!(view, r#"{"profileName":"p"}"#);
+        let (mut out, stdout, _) = crate::output::testing::capture(false);
+        render_profile_detail(&mut out, &bare, Format::Pretty).unwrap();
+        out.commit().unwrap();
+        assert!(!stdout.text().contains("DLP tenant"));
     }
 
     #[test]

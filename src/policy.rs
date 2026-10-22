@@ -772,6 +772,100 @@ mod tests {
         airs_test_harness::fixtures::runtime::directional_profile()["policy"].clone()
     }
 
+    /// scm-sdk 0.2.4's typed request (§15.25): a body validated with [`REQUEST_SCHEMA`]
+    /// keeps a string `dlp_tenant_id`, an explicit `false` (`Optional::Value(false)`), an
+    /// omitted setting (`Optional::Unset`), every direction and an unknown direction key,
+    /// and serialises back to the same document. The 0.35.0 root refuses `null` and wrong
+    /// types of the new fields, which the model's own 0.34.0 binding would let through.
+    #[test]
+    fn request_bodies_keep_the_directional_fields_as_given() {
+        use scm::data::Optional;
+        let mut body = airs_test_harness::fixtures::runtime::directional_profile();
+        body["policy"]["ai-security-profiles"][0]["content-type-configurations"]["audio"] =
+            json!({"future-setting": [1]});
+        body["policy"]["ai-security-profiles"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"model-type": "legacy", "model-configuration": {"mask-data-in-storage": true}}));
+        let typed = request_body(body.clone()).expect("a valid body");
+        assert_eq!(
+            typed.dlp_tenant_id,
+            Optional::Value("8259670718644550000".to_owned())
+        );
+        let entries = typed
+            .policy
+            .ai_security_profiles
+            .as_ref()
+            .into_option()
+            .unwrap();
+        let shared = |at: usize| {
+            entries[at]
+                .model_configuration
+                .as_ref()
+                .into_option()
+                .unwrap()
+                .enable_full_conversation_inspection
+                .clone()
+        };
+        assert_eq!(shared(0), Optional::Value(false));
+        assert_eq!(shared(1), Optional::Unset);
+        assert_eq!(
+            entries[0].content_type_mode,
+            Optional::Value("per_content_type".to_owned())
+        );
+        let directions = entries[0]
+            .content_type_configurations
+            .as_ref()
+            .into_option()
+            .unwrap();
+        for direction in [
+            &directions.prompt,
+            &directions.response,
+            &directions.tool_call,
+            &directions.tool_response,
+        ] {
+            assert!(!direction.is_unset());
+        }
+        assert_eq!(
+            directions
+                .extensions
+                .get("audio")
+                .map(scm::data::JsonValue::as_value),
+            Some(&json!({"future-setting": [1]}))
+        );
+        assert!(entries[1].content_type_configurations.is_unset());
+        assert_eq!(serde_json::to_value(&typed).unwrap(), body);
+
+        for (pointer, bad) in [
+            ("/dlp_tenant_id", json!(1)),
+            ("/dlp_tenant_id", Value::Null),
+            (
+                "/policy/ai-security-profiles/0/content-type-mode",
+                Value::Null,
+            ),
+            (
+                "/policy/ai-security-profiles/0/content-type-configurations/response",
+                Value::Null,
+            ),
+            (
+                "/policy/ai-security-profiles/0/model-configuration/enable-full-conversation-inspection",
+                json!("true"),
+            ),
+        ] {
+            let mut invalid = airs_test_harness::fixtures::runtime::directional_profile();
+            *invalid.pointer_mut(pointer).unwrap() = bad.clone();
+            assert!(request_body(invalid.clone()).is_none(), "{pointer} = {bad}");
+            assert!(
+                scm::airs::management::models::CreateSecurityProfileRequest::parse(
+                    invalid,
+                    scm::validation::Mode::Request
+                )
+                .is_ok(),
+                "the model's 0.34.0 binding accepts {pointer} = {bad}: keep the 0.35.0 root"
+            );
+        }
+    }
+
     #[test]
     fn latency_must_be_a_decimal_integer() {
         for bad in [

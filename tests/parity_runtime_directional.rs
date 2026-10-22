@@ -752,6 +752,135 @@ mod parity {
             );
         }
     }
+
+    /// scm-sdk 0.2.4 and TS SDK 0.35.0 both keep an unknown direction key (with its
+    /// unknown members) and treat `content-type-mode` as free text: reads print them and a
+    /// shared-only edit sends them back unchanged. No direction is synthesized.
+    #[test]
+    fn unknown_directions_and_modes_are_kept() {
+        let mut future = directional();
+        let ai = &mut future["policy"]["ai-security-profiles"][0];
+        ai["content-type-configurations"]["audio"] = json!({
+            "model-protection": [{"name": "future-detector", "action": "alert"}],
+            "future-setting": {"nested": [1, "two", null]}
+        });
+        ai["content-type-configurations"]
+            .as_object_mut()
+            .unwrap()
+            .remove("tool-call");
+        let mut unknown_mode = directional();
+        unknown_mode["policy"]["ai-security-profiles"][0]["content-type-mode"] =
+            json!("per_modality");
+        for (name, profile) in [("future", &future), ("unknown_mode", &unknown_mode)] {
+            let args = profiles(&["get", PROFILE_ID, "--output", "json"]);
+            let Some((rust, ts)) = both(&format!("directional_{name}_get"), profile, &refs(&args))
+            else {
+                return;
+            };
+            rust.run.assert_success();
+            assert_json_semantic_eq(&rust.run.json(), &ts.run.json());
+            assert_json_semantic_eq(&rust.run.json()["policy"], &profile["policy"]);
+            let args = profiles(&["update", PROFILE_ID, "--max-inline-latency", "7"]);
+            let Some((rust, ts)) =
+                both(&format!("directional_{name}_shared"), profile, &refs(&args))
+            else {
+                return;
+            };
+            assert_same_writes(&rust, &ts);
+            rust.run.assert_success();
+            let mut expected = profile["policy"].clone();
+            expected["ai-security-profiles"][0]["model-configuration"]["latency"]["max-inline-latency"] =
+                json!(7);
+            assert_json_semantic_eq(&rust.body()["policy"], &expected);
+            let directions =
+                &rust.body()["policy"]["ai-security-profiles"][0]["content-type-configurations"];
+            assert_eq!(
+                directions.get("tool-call").is_some(),
+                profile["policy"]["ai-security-profiles"][0]["content-type-configurations"]
+                    .get("tool-call")
+                    .is_some(),
+                "no direction is synthesized"
+            );
+        }
+    }
+
+    /// scm-sdk 0.2.4 / TS SDK 0.35.0 request validation: an explicit `null` or a wrong type
+    /// for a newly modelled field (`dlp_tenant_id`, `content-type-mode`,
+    /// `content-type-configurations`, a known direction, `enable-full-conversation-
+    /// inspection`) is refused by both CLIs before OAuth, on create and update.
+    #[test]
+    fn invalid_new_request_fields_are_refused_before_oauth() {
+        type Edit = fn(&mut Value);
+        let cases: [(&str, Edit); 10] = [
+            ("dlp_number", |p| {
+                p["dlp_tenant_id"] = json!(8_259_670_718_644_550_000_u64)
+            }),
+            ("dlp_null", |p| p["dlp_tenant_id"] = Value::Null),
+            ("mode_null", |p| {
+                p["policy"]["ai-security-profiles"][0]["content-type-mode"] = Value::Null
+            }),
+            ("mode_number", |p| {
+                p["policy"]["ai-security-profiles"][0]["content-type-mode"] = json!(1)
+            }),
+            ("configurations_null", |p| {
+                p["policy"]["ai-security-profiles"][0]["content-type-configurations"] = Value::Null
+            }),
+            ("configurations_text", |p| {
+                p["policy"]["ai-security-profiles"][0]["content-type-configurations"] =
+                    json!("prompt")
+            }),
+            ("tool_call_null", |p| {
+                p["policy"]["ai-security-profiles"][0]["content-type-configurations"]["tool-call"] =
+                    Value::Null
+            }),
+            ("tool_response_array", |p| {
+                p["policy"]["ai-security-profiles"][0]["content-type-configurations"]["tool-response"] =
+                    json!([])
+            }),
+            ("inspection_null", |p| {
+                p["policy"]["ai-security-profiles"][0]["model-configuration"]["enable-full-conversation-inspection"] =
+                    Value::Null
+            }),
+            ("inspection_text", |p| {
+                p["policy"]["ai-security-profiles"][0]["model-configuration"]["enable-full-conversation-inspection"] =
+                    json!("false")
+            }),
+        ];
+        for (name, edit) in cases {
+            let mut bad = directional();
+            edit(&mut bad);
+            for (args, path) in [
+                (
+                    profiles(&["create", "--config", "TMP/bad.json"]),
+                    "POST /v1/mgmt/profile".to_owned(),
+                ),
+                (
+                    profiles(&["update", PROFILE_ID, "--config", "TMP/bad.json"]),
+                    format!("PUT /v1/mgmt/profile/uuid/{PROFILE_ID}"),
+                ),
+            ] {
+                let Some((rust, ts)) = both_with(
+                    &format!("directional_invalid_{name}"),
+                    &directional(),
+                    &[("bad.json", &bad)],
+                    &refs(&args),
+                ) else {
+                    return;
+                };
+                for side in [&rust, &ts] {
+                    assert_eq!(side.run.code, 2, "{name}: {:?}", side.run);
+                    assert!(side.requests.is_empty(), "{name}: before OAuth");
+                }
+                assert_eq!(
+                    usage_line(&rust.run.stderr),
+                    Some(format!(
+                        "AISEC_USER_REQUEST_PAYLOAD_ERROR:Request body for {path} did not match schema"
+                    )),
+                    "{name}"
+                );
+            }
+        }
+    }
 }
 
 mod divergence {
@@ -848,6 +977,53 @@ mod divergence {
             Some("Topic \"Restricted\" is not assigned to the selected protection section")
         );
         assert!(!ts_requests.iter().any(|r| r.route.is_write()));
+    }
+
+    /// D334: a profile answer whose newly modelled fields hold an unexpected value (an
+    /// explicit `null`, a wrong type). TypeScript SDK 0.35.0's response schema refuses the
+    /// whole read; scm-sdk 0.2.4 keeps the value (its tolerant response binding), and the
+    /// CLI prints it as the server sent it.
+    #[test]
+    fn d334_unexpected_directional_response_values_are_printed_as_sent() {
+        type Edit = fn(&mut Value);
+        let cases: [(&str, Edit); 5] = [
+            ("dlp_null", |p| p["dlp_tenant_id"] = Value::Null),
+            ("dlp_number", |p| p["dlp_tenant_id"] = json!(42)),
+            ("inspection_null", |p| {
+                p["policy"]["ai-security-profiles"][0]["model-configuration"]["enable-full-conversation-inspection"] =
+                    Value::Null
+            }),
+            ("mode_number", |p| {
+                p["policy"]["ai-security-profiles"][0]["content-type-mode"] = json!(7)
+            }),
+            ("prompt_null", |p| {
+                p["policy"]["ai-security-profiles"][0]["content-type-configurations"]["prompt"] =
+                    Value::Null
+            }),
+        ];
+        for (name, edit) in cases {
+            let mut profile = directional();
+            edit(&mut profile);
+            let args = profiles(&["get", PROFILE_ID, "--output", "json"]);
+            let Some((rust, ts)) = both(&format!("d334_{name}"), &profile, &refs(&args)) else {
+                return;
+            };
+            rust.run.assert_success();
+            let printed = rust.run.json();
+            assert_eq!(printed["policy"], profile["policy"], "{name}");
+            assert_eq!(
+                printed.get("dlpTenantId"),
+                profile.get("dlp_tenant_id"),
+                "{name}: the key is kept, null included"
+            );
+            ts.run.assert_code(1);
+            assert!(
+                ts.run.stderr.contains("Response did not match schema"),
+                "{name}: {}",
+                ts.run.stderr
+            );
+            assert!(ts.run.stdout.is_empty(), "{name}");
+        }
     }
 }
 

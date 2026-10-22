@@ -65,6 +65,8 @@ airs runtime profiles update Directional --config ./directional.json
 | An unknown `content-type-mode` | kept by shared edits; protection edits are refused |
 | Detectors | merged by name: a match keeps its severities and topic lists; a name listed twice is refused |
 | `--no-…` flags | write an explicit `false`; of a pair, the last one given wins |
+| A setting you do not pass | stays as stored, or absent; no default is written |
+| An unknown direction key | kept with its value by reads, updates, backup and restore; no direction is added |
 | `--dlp-profiles`, `--[no-]mask-data-inline` | change only their fields on update; no `--dlp-action` needed |
 
 These refusals happen after the profile is read; nothing is written and the exit code is 2.
@@ -93,11 +95,16 @@ for legacy profiles.
 
 - `airs runtime profiles get` shows `DLP tenant` (when the service returns one) and
   `Protection locations` (`AI[0] default / prompt, AI[0] default / response, …`). JSON adds
-  `dlpTenantId`; a GET may omit it.
+  `dlpTenantId` (a string); a GET may omit it. A value the service sends that the schema does
+  not expect (a `null`, a number) is printed as sent; the TypeScript CLI refused such a read.
+- A `--config` file is checked before the tenant is read: `dlp_tenant_id` must be a string,
+  `content-type-mode` a string, each direction an object and
+  `enable-full-conversation-inspection` a boolean, never `null` (exit 2).
 - `airs runtime report` adds a **Protection configurations** column: one entry per AI entry
   and direction, with the protection sections it holds.
 - `airs runtime profiles backup` and `restore` carry every direction: DLP mappings, the Basic
   fallback and topic remapping work per direction, and `--on-conflict verify` compares
-  directions strictly.
+  directions strictly. A backup keeps each record as the service sent it; a restore does not
+  send the source tenant's `dlp_tenant_id`.
 
 The behavioural contract is DESIGN §13.17 in the repository.

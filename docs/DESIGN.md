@@ -4695,6 +4695,7 @@ raw scan read, §20.16 choice 77).
 | D331 | doctor's `Executable` check (8.0) | none (its first check is `Node.js version`; `PATH` is never examined) | the first check, always evaluated: `warn` when another `airs`, `airs-cli` or `airs-cli-rs` earlier on `PATH` resolves to a different file than this program, else `pass`; never `fail`, so the exit code is unchanged (§21.15) | the four install channels can shadow each other (Homebrew's Node and the formula share `/opt/homebrew/bin`), and a stale TypeScript `airs-cli` may come first |
 | D332 | `--ai-profile-index <n>` (`profiles update`, `topics apply|revert`, 8.0) | `Number(value)`: `0x0`, `1e0`, `" 1"` and an empty value are indexes | decimal digits only (at most 2^53 − 1), else `--ai-profile-index must be a nonnegative integer` (exit 2, before the tenant) (§13.17) | strict parsing (D17) |
 | D333 | which refs `topics revert` counts as the topic's in its 8.0 reference checks | the in-scope check needs a ref with the first-listed revision's id and the name, the cross-direction check matches the name only: a ref pinned to another revision of the topic is "not assigned" | the §13.4 identity, as the surgery uses: a ref whose `topic_name` is the name or whose `topic_id` is the id of any listed revision with that name (§13.17) | the checks must see every ref the surgery removes (correctness) |
+| D334 | a profile answer (`profiles get`, `list`, the `create` and `update` answers, the reads of `topics apply\|revert`, `profiles backup`) whose newly modelled scm-sdk 0.2.4 fields hold an unexpected value: an explicit `null` or a wrong type for `dlp_tenant_id`, `content-type-mode`, `content-type-configurations`, a known direction or `enable-full-conversation-inspection` (8.0) | TS SDK 0.35.0's response schema refuses the whole read: `AISEC_RESPONSE_VALIDATION:Response did not match schema: …` (exit 1), nothing printed | the read succeeds (scm-sdk 0.2.4's tolerant response binding keeps the value in the model's extensions) and the value is printed and backed up as sent: `dlpTenantId` is the record's value (`null`, a number), the pretty `DLP tenant` line its compact JSON, the policy every key as sent; a flag update, `topics apply\|revert` or a restore that would send the value back fails the request schema before its write (the D116 text; exit 2 for `profiles update`, exit 1 for the topic commands and restore) (§13.17, §15.25) | a faithful read must not hide what the service stores (G25, D306), and the request schema still guards every write |
 
 ## 13. M4 runtime writes (0.4)
 
@@ -5527,8 +5528,10 @@ pretty is the §7.6 detail **without** the runtime banner, json the §7.5 object
 `--output`, else the tenant's `defaultOutput`, else pretty (D94). Every profile view
 (`get`, `list`, `create`, `update`) gains:
 - json and table: `dlpTenantId` after `policy`, only when the record carries
-  `dlp_tenant_id` (a GET may omit it);
-- pretty detail: `DLP tenant  <id>` after `Status`, and `Protection locations
+  `dlp_tenant_id` (a GET may omit it), with the value the record carries (an unexpected
+  `null` or number included, D334);
+- pretty detail: `DLP tenant  <id>` after `Status` (a value that is not a string as its
+  compact JSON, D334), and `Protection locations
   AI[<i>] <model-type, else unspecified> / <direction|legacy>[, …]` (the active locations)
   before `Policy`;
 - the printed policy in TypeScript SDK 0.35.0's key order: scm-sdk 0.2.4 serialises an AI
@@ -5569,6 +5572,21 @@ the 0.4.1 409 rule (D99).
   canonical `database-security: null` and the comparison's server-default allowances apply
   to legacy entries only, so directions compare strictly; topic references were already
   found anywhere in the policy.
+
+**The scm-sdk 0.2.4 fields** (§15.25). The CLI builds and reads JSON documents and types
+them with the SDK models only at its edges, so every field keeps the three states the SDK
+keeps (`Optional::Unset`, an explicit value, and an unexpected value in the extensions):
+- an omitted setting stays omitted: no flag default is written (a boolean pair writes only
+  when one of its forms is given), and the merge never inserts a key the read lacked;
+  an explicit `false` is written and kept (`Optional::Value(false)`);
+- `dlp_tenant_id` is a string. A `--config` body sends it as written; a flag update sends
+  TS 7.3.0's `{profile_name, active, policy}` and so no `dlp_tenant_id`; a restore never
+  sends the source's (a tenant-bound identifier, TS's body); a backup keeps the record's;
+- `content-type-mode` is free text (`per_content_type` is the one observed value); the four
+  known directions are independently optional and an unknown direction key is kept with
+  its value by every read, merge, backup and restore; no direction is synthesized;
+- an answer holding an unexpected value of a new field is printed and backed up as sent,
+  and a write that would send it back fails the request schema (D334).
 
 **Exit codes.** 2 for every check above (before the tenant, or after the read for the
 layout refusals and a merged body), 1 for the rest as in §13.3.
