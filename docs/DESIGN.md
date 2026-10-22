@@ -5523,7 +5523,8 @@ keep exit 1 (TS reports their schema failure as an operational error). The trans
 commands validate with the same roots (`valid_profile_body`, the Basic fallback's
 `typescript:0.35.0:PolicySchema`), and a restore checks each mapped body again with the
 request root just before its write (`policy::request_body`; a mismatch is the stop text,
-nothing sent), never with the model's 0.34.0 `parse`.
+nothing sent), never with the model's 0.34.0 `parse` (defence in depth: planning already checks
+the source body with the same root, so no tested body reaches this refusal).
 
 **Output** (TS 7.3.0 `emitDetail`). `profiles create|update` print the status line
 `  Profile created|updated: <id>` (dim, stderr, quiet-suppressed; D106) and the response:
@@ -8512,18 +8513,25 @@ ran again on it.
    page: `runtime::options`, the 60 s budget `None` gave), `list --all`, `get` and its
    walks (`get_by_name`, `--all-versions`), the `profiles update|delete` lookups, the
    profile read of `topics apply|revert` and the `profiles cleanup` listings
-   (`commands::profile_walk_options`: the one 300 s deadline of the token and the walk,
-   as before), plus the backup (§18.15), restore (§18.16) and report (§18.13) reads that
-   already did. Every profile write whose answer is printed or kept (`profiles
-   create|update`, the `topics apply|revert` PUTs, the restore's writes) builds per attempt
+   (`commands::profile_walk_options`; the deadlines are as before: one 300 s deadline
+   shared by the token and the walk for `list --all`, `get` and the update and delete
+   lookups, while `profiles cleanup` keeps its token's deadline and gives each listing, the
+   first and the re-check after the confirmation, its own), plus the backup (§18.15),
+   restore (§18.16) and report (§18.13) reads that already did. Every profile write
+   (`profiles create|update`, the `topics apply|revert` PUTs, whose answers are discarded,
+   and the restore's writes) builds per attempt
    `runtime::request_options(SINGLE_REQUEST_BUDGET)` (no defaults, the same 60 s; one
-   attempt and the single 401 replay unchanged, D95). Excluded with reason: the profile
-   and topic deletes (their answers are neither printed nor kept), the topic walks (their
-   `examples: []` default is TypeScript's output, G27) and the DLP reads (no default is
-   reachable, §16 "G10 does not apply"). The evidence is
-   `src/commands/mod.rs::tests::profile_reads_and_writes_skip_the_response_defaults` (the
-   options, and the SDK half: the option keeps an absent `ai_profiles` absent and a
-   directional record reads identically in both modes) and the multi-page tests
+   attempt and the single 401 replay unchanged, D95), so one rule covers every profile
+   PUT and POST. Excluded with reason: the profile and topic deletes (their answers are
+   neither printed nor kept), the topic walks (their `examples: []` default is
+   TypeScript's output, G27) and the DLP reads (no default is reachable, §16 "G10 does not
+   apply"). No output can show the option while no profile default is reachable, so the
+   evidence is `src/commands/mod.rs::tests::profile_reads_and_writes_skip_the_response_defaults`
+   (the options, and the SDK half: the option keeps an absent `ai_profiles` absent and a
+   directional record reads identically in both modes), the call-site guard
+   `src/commands/mod.rs::tests::profile_call_sites_use_the_no_default_options` (no profile
+   read or write in the profile commands passes `None` or the defaulted `walk_options()`)
+   and the multi-page tests
    `tests/management.rs::sdk_0_2_4_pages` and
    `tests/runtime_transfer.rs::backup::directional_records_are_stored_losslessly_on_every_page`.
    **Faithful output.** `profiles backup` is the lossless path: it stores each record as
