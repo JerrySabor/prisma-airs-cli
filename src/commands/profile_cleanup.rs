@@ -9,7 +9,7 @@
 //! proceeds. Deletions are sequential plain deletes, or force deletes with
 //! `--updated-by`; the first one with an unknown outcome stops the run.
 
-use super::{Invocation, confirm, nothing_changed, walk_options};
+use super::{Invocation, confirm, nothing_changed, profile_walk_options, walk_options};
 use crate::cli::ProfileCleanupArgs;
 use crate::clients::WALK_BUDGET;
 use crate::error::{CliError, InterruptContext};
@@ -446,12 +446,13 @@ fn bullet_text(outcome: &Outcome<'_>) -> String {
 }
 
 /// The complete listing (D108): the SDK walk, every revision, nothing below the
-/// 1,000,000-row ceiling cut off.
+/// 1,000,000-row ceiling cut off. Each listing (the first and the re-check) has its own
+/// 300 s deadline and reads without the response defaults (§15.25).
 async fn listing(
     invocation: &Invocation,
     management: &ManagementClient,
 ) -> Result<Vec<SecurityProfile>, CliError> {
-    let options = walk_options()?;
+    let options = profile_walk_options()?;
     let mut all = ProfileListAllOptions::default();
     all.limit = PAGE;
     all.latest = None;

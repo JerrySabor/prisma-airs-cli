@@ -3,9 +3,10 @@
 //! Flags arrive validated (`pagination`); `format` is the explicit `--output` or
 //! `None`, in which case the tenant's `defaultOutput` (else `pretty`) applies.
 //! A single page uses the SDK's per-request budget; every walk (`--all`, lookups) runs
-//! under one shared 300 s deadline.
+//! under one shared 300 s deadline. Every profile read is validated without the SDK's
+//! response defaults (§15.25), so a record holds only the keys the server sent.
 
-use super::{Invocation, walk_options};
+use super::{Invocation, profile_walk_options};
 use crate::clients::{SINGLE_REQUEST_BUDGET, WALK_BUDGET};
 use crate::error::CliError;
 use crate::output::Format;
@@ -29,9 +30,11 @@ pub async fn list(
     page.offset = params.offset;
     page.limit = params.limit;
     page.latest = Some(!params.all_versions);
+    // The SDK's per-request budget (what `None` gives), without the response defaults.
+    let options = crate::runtime::options(SINGLE_REQUEST_BUDGET)?;
     let response = management
         .profiles()
-        .list(page, None)
+        .list(page, Some(&options))
         .await
         .map_err(|error| invocation.management_error(&error, SINGLE_REQUEST_BUDGET))?;
     // `next_offset` 0 ends pagination, so it does not mean more rows (D12).
@@ -54,7 +57,7 @@ async fn list_all(
     params: &ListParams,
     format: Option<Format>,
 ) -> Result<(), CliError> {
-    let options = walk_options()?;
+    let options = profile_walk_options()?;
     let (management, format) = invocation
         .connect_management(format, Some(&options))
         .await?;
@@ -83,7 +86,7 @@ pub async fn get(
     params: &GetParams,
     format: Option<Format>,
 ) -> Result<(), CliError> {
-    let options = walk_options()?;
+    let options = profile_walk_options()?;
     let (management, format) = invocation
         .connect_management(format, Some(&options))
         .await?;

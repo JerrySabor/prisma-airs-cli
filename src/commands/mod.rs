@@ -343,6 +343,15 @@ pub fn walk_options() -> Result<scm::RequestOptions, CliError> {
     })
 }
 
+/// [`walk_options`] without the SDK's response defaults: the one shared deadline of a
+/// profile read (a page, a walk or a lookup) and of its token request (§15.25 "Response
+/// defaults"). Only `SecurityProfileListResponse.ai_profiles: []` is reachable today, and
+/// an absent list already reads as empty, so nothing printed changes; a profile record
+/// never gains a key the server did not send.
+pub fn profile_walk_options() -> Result<scm::RequestOptions, CliError> {
+    walk_options().map(scm::RequestOptions::without_response_defaults)
+}
+
 /// A fully validated invocation.
 pub enum Plan {
     /// A command group without a subcommand: its help on stderr, exit 2.
@@ -1139,5 +1148,39 @@ mod tests {
             ]),
             Ok(Plan::Scan(_, Format::Table))
         ));
+    }
+
+    /// scm-sdk 0.2.4 (DESIGN §15.25 "Response defaults"): every profile read and every
+    /// profile write whose answer is printed runs without the SDK's response defaults;
+    /// topic walks keep them (G27, TypeScript's `examples: []`). The SDK half: the option
+    /// is what keeps an absent `ai_profiles` absent, and no default is reachable from a
+    /// profile record, so a directional record reads the same in both modes.
+    #[test]
+    fn profile_reads_and_writes_skip_the_response_defaults() {
+        use scm::airs::management::models::{SecurityProfile, SecurityProfileListResponse};
+        use scm::validation::Mode;
+        assert!(!profile_walk_options().unwrap().response_defaults());
+        assert!(walk_options().unwrap().response_defaults());
+        assert!(
+            !crate::runtime::request_options(crate::clients::SINGLE_REQUEST_BUDGET)
+                .unwrap()
+                .response_defaults()
+        );
+        let empty = serde_json::json!({});
+        let defaulted = SecurityProfileListResponse::parse(empty.clone(), Mode::Response).unwrap();
+        let sent =
+            SecurityProfileListResponse::parse(empty, Mode::ResponseWithoutDefaults).unwrap();
+        assert!(!defaulted.ai_profiles.is_unset());
+        assert!(sent.ai_profiles.is_unset());
+        let mut record = airs_test_harness::fixtures::runtime::directional_profile();
+        record["policy"]["ai-security-profiles"][0]["content-type-configurations"]["audio"] =
+            serde_json::json!({"future": null});
+        record["policy"]["ai-security-profiles"][0]["model-configuration"]["enable-full-conversation-inspection"] =
+            serde_json::Value::Null;
+        record["extra_top_level"] = serde_json::json!("kept");
+        for mode in [Mode::Response, Mode::ResponseWithoutDefaults] {
+            let parsed = SecurityProfile::parse(record.clone(), mode).unwrap();
+            assert_eq!(serde_json::to_value(&parsed).unwrap(), record, "{mode:?}");
+        }
     }
 }

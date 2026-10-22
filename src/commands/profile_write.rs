@@ -7,9 +7,9 @@
 //! body computed from that read (§13.4). A directional layout refusal after the read is
 //! a usage error too, and nothing is written.
 
-use super::{Invocation, confirm, nothing_changed, walk_options};
+use super::{Invocation, confirm, nothing_changed, profile_walk_options};
 use crate::cli::{ProfileCreateArgs, ProfileDeleteArgs, ProfileUpdateArgs};
-use crate::clients::WALK_BUDGET;
+use crate::clients::{SINGLE_REQUEST_BUDGET, WALK_BUDGET};
 use crate::error::{CliError, Failure};
 use crate::output::{Format, terminal_safe};
 use crate::policy::{self, Flags, Patch};
@@ -206,7 +206,13 @@ pub async fn create(invocation: &mut Invocation, plan: &CreatePlan) -> Result<()
         .await
         .map_err(nothing_changed)?;
     let profiles = management.profiles();
-    let result = writes::attempt(async || profiles.create(&body, None).await).await;
+    // Options per attempt: the SDK's 60 s budget that `None` gives, without the response
+    // defaults (§15.25); the attempt rules stay D95's.
+    let result = writes::attempt(async || {
+        let options = crate::runtime::request_options(SINGLE_REQUEST_BUDGET)?;
+        profiles.create(&body, Some(&options)).await
+    })
+    .await;
     let profile = match result {
         Ok(profile) => profile,
         // D101: a 409 is an error naming the profile, never a lookup or a false success.
@@ -293,7 +299,7 @@ pub async fn update(invocation: &mut Invocation, plan: &UpdatePlan) -> Result<()
         }
         None => None,
     };
-    let options = walk_options()?;
+    let options = profile_walk_options()?;
     let (management, format) = invocation
         .connect_management(plan.format, Some(&options))
         .await
@@ -338,7 +344,8 @@ pub async fn update(invocation: &mut Invocation, plan: &UpdatePlan) -> Result<()
     };
     let secrets = invocation.secrets.clone();
     let profile = writes::send(&secrets, Change::ProfileUpdated, async || {
-        profiles.update(id, &body, None).await
+        let options = crate::runtime::request_options(SINGLE_REQUEST_BUDGET)?;
+        profiles.update(id, &body, Some(&options)).await
     })
     .await?;
     invocation.committed = true;
@@ -350,7 +357,7 @@ pub async fn update(invocation: &mut Invocation, plan: &UpdatePlan) -> Result<()
 }
 
 pub async fn delete(invocation: &mut Invocation, plan: &DeletePlan) -> Result<(), CliError> {
-    let options = walk_options()?;
+    let options = profile_walk_options()?;
     let (management, _) = invocation
         .connect_management(Some(Format::Pretty), Some(&options))
         .await

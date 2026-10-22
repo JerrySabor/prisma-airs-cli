@@ -9,9 +9,11 @@
 //! nothing is written). `revert` then deletes the topic with a plain delete (D99) and
 //! reports a partial completion when the delete fails after the profile was updated.
 
-use super::{Invocation, confirm, nothing_changed, topics::complete_walk, walk_options};
+use super::{
+    Invocation, confirm, nothing_changed, profile_walk_options, topics::complete_walk, walk_options,
+};
 use crate::cli::{TopicApplyArgs, TopicRevertArgs};
-use crate::clients::WALK_BUDGET;
+use crate::clients::{SINGLE_REQUEST_BUDGET, WALK_BUDGET};
 use crate::error::{CliError, InterruptContext};
 use crate::output::{Format, terminal_safe};
 use crate::policy::{self, TopicIdentity};
@@ -228,7 +230,7 @@ pub async fn apply(invocation: &mut Invocation, plan: &ApplyPlan) -> Result<(), 
         })?;
     // The profile is read last; nothing lies between this read and the PUT (D97).
     let profiles = management.profiles();
-    let options = walk_options()?;
+    let options = profile_walk_options()?;
     let (current, id) = read_profile(invocation, &profiles, &plan.profile, &options).await?;
     let before = read_policy(&current, &id)?;
     let new_ref = json!({
@@ -254,7 +256,8 @@ pub async fn apply(invocation: &mut Invocation, plan: &ApplyPlan) -> Result<(), 
         let body = profile_body(&current, &id, after)?;
         let secrets = invocation.secrets.clone();
         writes::send(&secrets, Change::ProfileUpdated, async || {
-            profiles.update(&id, &body, None).await
+            let options = crate::runtime::request_options(SINGLE_REQUEST_BUDGET)?;
+            profiles.update(&id, &body, Some(&options)).await
         })
         .await?;
         invocation.committed = true;
@@ -325,7 +328,7 @@ pub async fn revert(invocation: &mut Invocation, plan: &RevertPlan) -> Result<()
         return Ok(());
     }
     let profiles = management.profiles();
-    let options = walk_options()?;
+    let options = profile_walk_options()?;
     let (current, id) = read_profile(invocation, &profiles, &plan.profile, &options).await?;
     let before = read_policy(&current, &id)?;
     // A topic the selected block does not reference, or that another block still
@@ -335,7 +338,8 @@ pub async fn revert(invocation: &mut Invocation, plan: &RevertPlan) -> Result<()
     let body = profile_body(&current, &id, after)
         .map_err(|error| with_detail(error, "The topic was not deleted.".into()))?;
     writes::send(&secrets, Change::ProfileUpdated, async || {
-        profiles.update(&id, &body, None).await
+        let options = crate::runtime::request_options(SINGLE_REQUEST_BUDGET)?;
+        profiles.update(&id, &body, Some(&options)).await
     })
     .await
     .map_err(|error| with_detail(error, "The topic was not deleted.".into()))?;
