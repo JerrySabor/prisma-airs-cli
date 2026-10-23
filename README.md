@@ -17,6 +17,50 @@ refuses an answer on a string format (`uuid`, `date-time`, `email`, `url` and th
 where the TypeScript CLI and 0.9.0 fail the read, `airs` reads and prints the answer
 unchanged (D306).
 
+## Why Rust: performance
+
+Speed and footprint are the reason this CLI was rewritten. Every run of the TypeScript CLI
+first starts Node.js, then loads and compiles its JavaScript and 65 production packages,
+before it reads its first argument. `airs` is one native executable with no runtime: it
+starts in about 6 ms, and its p95 stays within 2 ms of its median.
+
+Measured on 2026-10-23, `airs` 8.0.0 against the TypeScript CLI 7.3.0 (Apple M5 Pro; medians
+of 30 runs against a loopback fixture; [docs/BENCHMARKS.md](docs/BENCHMARKS.md)):
+
+| Workload | `airs` 8.0.0 | TypeScript 7.3.0 | Faster |
+|---|---:|---:|---:|
+| Start-up (`airs --version`) | 6.3 ms | 80.6 ms | **13x** |
+| Local commands (`--help`, `tenant list`, `tenant read`) | 8.7–8.9 ms | 82.4–85.9 ms | **9.3–9.9x** |
+| One API call (a scan, one profiles page) | 17.5–17.7 ms | 96.8–98.9 ms | **5.5–5.6x** |
+| `doctor` | 18.5 ms | 117 ms | **6.3x** |
+| Paging 2,000 profiles or topics (`--all`) | 29.8–44.4 ms | 118–130 ms | **2.9–4.0x** |
+| 50 scans in a row | 0.85 s | 4.91 s | **5.8x** |
+
+| Resources | `airs` 8.0.0 | TypeScript 7.3.0 | Less |
+|---|---:|---:|---:|
+| CPU time per command | 3.5–34 ms | 95–207 ms | **6.1–27x** |
+| Peak memory per command | 6.5–72 MiB | 106–174 MiB | **2.0–16x** |
+| Installed on disk (macOS arm64) | 31.1 MiB, one executable | 219.6 MiB: 103 MiB in 3,104 files, plus the 116 MiB Node.js runtime | **7.1x** |
+| Runtime required | none | Node.js | |
+
+- **The executables.** `airs` ships as one binary per platform: 31.07 MiB on macOS arm64
+  (signed and notarised), 38.65 MiB on Linux x86_64 and 30.63 MiB on Linux arm64 (both
+  static musl, no shared libraries). The release tarballs are 13.0–14.5 MiB. The binary grew
+  from 9.6 MiB in 0.1.0 (10 commands) to 31.1 MiB in 8.0.0 (277 commands, every TypeScript
+  command group), in steps that follow the ported groups; BENCHMARKS "How the executable
+  grew" has the table.
+- **What the growth cost.** Against 0.1.0, a parsed command is about 2.5 ms slower and an API
+  command about 4 ms slower, which leaves every factor above in place.
+- **On a real tenant** a management read waits 0.7–0.8 s for the service, so the 80 ms that
+  `airs` saves per command shows as a constant, not a multiple. Scripts and agents that run
+  the CLI hundreds of times, local commands, and the CPU and memory a host spends on them
+  get the full factors.
+- **Node's compile cache** (`NODE_COMPILE_CACHE`) makes the TypeScript CLI 10–12 ms faster
+  per run; `airs` is still 2.7–11x faster than that.
+
+Reproduce with `cargo run --release -p airs-test-harness --example bench -- --ts-compile-cache`
+after `scripts/build-reference-cli.sh` (BENCHMARKS "Reproduce").
+
 ## Status
 
 Version 8.0.0 covers milestones 1–3, the M3.5 foundations, M4t tenant writes, M4 runtime

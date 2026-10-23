@@ -3,6 +3,13 @@
 Release notes for each version are in [docs/RELEASE-NOTES/](docs/RELEASE-NOTES/). This
 file records the changes to the repository itself.
 
+## Unreleased
+
+- **Performance documentation.** docs/BENCHMARKS.md is re-measured for 8.0.0 against the
+  TypeScript CLI 7.3.0 (2026-10-23), with the executables' sizes per platform, their growth
+  from 0.1.0 and what that growth costs. README gains "Why Rust: performance", the docs site
+  a Performance page, and the 8.0.0 release notes a Performance section.
+
 ## 8.0.0 (2026-10-22)
 
 ### The Rust CLI replaces the TypeScript CLI in this repository
