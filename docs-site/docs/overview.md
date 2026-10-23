@@ -11,6 +11,10 @@ self-contained executable, written in Rust on the published
 Prisma AIRS CLI (7.x). From 8.0.0 it is published from this repository on every channel:
 Homebrew, npm, crates.io and prebuilt release tarballs.
 
+It starts in about 6 ms where the TypeScript CLI took 81 ms, spends 5.5x less time of its own
+on a scan, and installs as one 31 MiB executable instead of 220 MiB of Node.js and npm
+packages (see [Performance](./performance.md)).
+
 It covers:
 
 | Area | Commands |

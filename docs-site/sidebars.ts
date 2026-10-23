@@ -8,6 +8,7 @@ import type { SidebarsConfig } from '@docusaurus/plugin-content-docs';
 const sidebars: SidebarsConfig = {
   docs: [
     'overview',
+    'performance',
     {
       type: 'category',
       label: 'Getting Started',
